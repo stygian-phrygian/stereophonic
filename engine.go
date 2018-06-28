@@ -6,9 +6,19 @@ import (
 	"sync"
 )
 
+/* ISSUES
+reconsidering API choices, particularly how to start/stop/open/close streams
+should we have 4 methods 1-1 for the above functionality or
+2 methods, open/close or start/stop which each do 2 of the functions above
+this library isn't meant to be streaming to multple devices, so we don't need multiple
+stream control really
+*/
+
 const (
-	ConfigureWhileStreamStarted  error = fmt.Errorf("cannot configure engine while started, must call Stop() first")
-	ConfigureWhileNotInitialized error = fmt.Errorf("cannot configure engine while not initialized, must call Reinitialize() first")
+	CannotConfigureWhileStreamStarted  error = fmt.Errorf("cannot configure engine while started, must call Stop() first")
+	CannotConfigureWhileNotInitialized error = fmt.Errorf("cannot configure engine while not initialized, must call Reinitialize() first")
+	AlreadyInitialized                 error = fmt.Errorf("already initialized engine")
+	AlreadyStarted                     error = fmt.Errorf("already started engine")
 )
 
 // engine is a type which maintains structural information
@@ -29,6 +39,20 @@ type Engine struct {
 	// a TablePlayer's reached a "done" state of playback
 	activeTablePlayers []*TablePlayer
 	// flag to check whether portaudio is initialized
+	//
+	// side note:
+	// portaudio allows multiple initialization (of which an equivalent number of
+	// terminations are subsequently demanded).  I chose to forgo this behavior
+	// Why?
+	// 1. disallow strange situations
+	// 2. I want the engine API to be minimal, just New & Close (not New, Close, Initialize, Terminate, etc)
+	//
+	// If I didn't put initialization into New(), then I couldn't acquire
+	// default stream parameters (a query to portaudio which requires initialization prior)
+	// hence New() would be doing nothing but building a struct.  You'd need a subsequent Initialize(), then
+	// SetDefaults() (strictly in that order).  Similarly, Close() should close the underlying stream & terminate
+	// portaudio (instead of a separate Close() and Terminate()).  That said, in the event that you Close()
+	// but happen to want to boot up portaudio again, there's a provided Reinitialize() method for you.
 	initialized bool
 	// flag to check whether the portaudio stream started
 	started bool
@@ -87,21 +111,22 @@ func (e *Engine) ListDevices() ([]*portaudio.DeviceInfo, err) {
 }
 
 // setters for sample rate, framesPerBuffer, and output device
-// the engine must be 1. initialized and 2. stopped to configure
-// these parameters, otherwise an error is returned
-// Nota Bene, you might be able to set values which will incur
-// an error once Start() is called afterwards (resuming playback)
-// these setters *wont* show you whether the values set are acceptable
+// the engine must be:
+// 1. initialized
+// 2. stopped
+// otherwise an error is returned
+// Nota Bene, these setters *wont* show you whether
+// the values set are acceptable
 func (e *Engine) SetSampleRate(sr float64) error {
 	// lock self temporarily as we update it
 	b.Lock()
 	defer b.Unlock()
 	// check for errors first
 	if e.started {
-		return ConfigureWhileStreamStarted
+		return CannotConfigureWhileStreamStarted
 	}
 	if !e.initialized {
-		return ConfigureWhileNotInitialized
+		return CannotConfigureWhileNotInitialized
 	}
 	// update the stream parameters (atomically)
 	e.streamParameters.SampleRate = sr
@@ -113,10 +138,10 @@ func (e *Engine) SetFramesPerBuffer(framesPerBuffer int) error {
 	defer b.Unlock()
 	// check for errors first
 	if e.started {
-		return ConfigureWhileStreamStarted
+		return CannotConfigureWhileStreamStarted
 	}
 	if !e.initialized {
-		return ConfigureWhileNotInitialized
+		return CannotConfigureWhileNotInitialized
 	}
 	// update the stream parameters (atomically)
 	e.streamParameters.FramesPerBuffer = framesPerBuffer
@@ -128,13 +153,13 @@ func (e *Engine) SetDevice(deviceInfo *portaudio.DeviceInfo) error {
 	defer b.Unlock()
 	// check for errors first
 	if e.started {
-		return ConfigureWhileStreamStarted
+		return CannotConfigureWhileStreamStarted
 	}
 	if !e.initialized {
-		return ConfigureWhileNotInitialized
+		return CannotConfigureWhileNotInitialized
 	}
 	// create a new (low latency) stream parameter configuration (for the new device)
-	// hopefully you passed in an output device, otherwise Start() explodes an error
+	// hopefully you passed in an output device, otherwise Start() explodes later)
 	streamParameters := portaudio.LowLatencyParameters(nil, deviceInfo)
 	// force stereo
 	// the output device *must* support stereo (otherwise this entire library will not work)
@@ -145,14 +170,59 @@ func (e *Engine) SetDevice(deviceInfo *portaudio.DeviceInfo) error {
 	return nil
 }
 
-// start streaming audio to the output device
+// open and start an audio stream to the output device
 func (e *Engine) Start() error {
-	//TODO
+	var (
+		err    error
+		stream *portaudio.Stream
+	)
+	// update atomically
+	e.Lock()
+	defer e.Unlock()
+
+	// check that we aren't already started
+	if e.started {
+		return AlreadyStarted
+	}
+
+	// open an (output only) stream
+	// with prior specified stream parameters & our callback
+	stream, err = portaudio.OpenStream(e.streamParameters, e.streamCallback)
+	if err != nil {
+		return err
+	}
+	// otherwise the stream *opened* successfully
+	// now we can *start* it
+	if err = stream.Start(); err != nil {
+		return err
+	}
+	// flag that we are started
+	e.started = true
+	// save a reference to the newly created stream
+	e.stream = stream
+	// return without error
+	return nil
 }
 
-// stop streaming audio to the output device
+// stop & close and audio stream
 func (e *Engine) Stop() error {
-	//TODO
+	// update atomically
+	e.Lock()
+	defer e.Unlock()
+
+	// try to stop the stream (if it exists ofc)
+	if e.stream != nil {
+		if err := e.stream.Stop(); err != nil {
+			// if it failed, return the error
+			return err
+		}
+	}
+	// otherwise the stream stopped successfully
+	// flag that we aren't started anymore
+	// NB. we aren't deleting the stream, just stopping it
+	e.started = false
+	// return without error
+	return nil
 }
 
 // should be called after you're done utilizing the Engine
@@ -160,16 +230,66 @@ func (e *Engine) Stop() error {
 // if you wish to resuse the Engine after Close(), call
 // Reinitialize() first
 func (e *Engine) Close() error {
-	return portaudio.Terminate()
+	var (
+		err error
+	)
+
+	// update atomically
+	e.Lock()
+	defer e.Unlock()
+
+	// try to close the stream (if it exists ofc)
+	if stream != nil {
+		if err = e.stream.Close(); err != nil {
+			// if it failed, return the error
+			return err
+		}
+	}
+	// otherwise the stream closed successfully
+	// flag that we aren't started anymore
+	e.started = false
+
+	// remove the stream
+	e.stream = nil
+
+	// remove the active playing tables
+	e.activeTablePlayers = []*TablePlayer{}
+
+	// now try to turn off portaudio
+	if err := portaudio.Terminate(); err != nil {
+		// if it failed, return the error
+		return err
+	}
+	// otherwise termination of portaudio was successful
+	// flag that we aren't initialized anymore
+	e.initialized = false
+
+	return nil
 }
 
 // used to (re)initialize the engine (should you have called Close() prior)
-// New() automatically initializes portaudio
+// This provides the option of simply restarting the engine (after a call Close())
+// without reloading all the sample files into tables
 func (e *Engine) Reinitialize() error {
+	// update atomically
+	e.Lock()
+	defer e.Unlock()
+
+	// firstly, check that the intialized flag is false
 	if e.initialized {
-		return fmt.Errorf("already initialized this stereophonic engine")
+		// return error if it's true, we don't want to initialize twice
+		//
+		//
+		return AlreadyInitialized
 	}
-	return portaudio.Initialize()
+
+	// now, try to initialize
+	if err := portaudio.Initialize(); err != nil {
+		return err
+	}
+	// assuming we successfully initialized portaudio
+	// flag that we did so
+	e.initialized = true
 }
 
 // loads a soundfile into a sample slot
