@@ -9,8 +9,17 @@ import (
 /*
 ISSUES
 
+trigger playback with playback parameters
+ex. e.Play(1, {speed: 1.5, sampleOffset: 0.4})
+iunno.  Instead of just a default table playback everytime,
+we need a method to trigger specific events
+
 
 SOLUTIONS
+
+create an event object? which e.Play() can utilize
+for preconfiguring a TablePlayer, before tick() is computing
+sample frames from it
 
 
 */
@@ -278,8 +287,15 @@ func (e *Engine) Reopen() error {
 // loads a soundfile into a sample slot
 // (which internally just loads a table with the soundfile frames,
 // then saves a reference in the engine)
-func (e *Engine) Load(slot int, sampleFile string) err {
-	//TODO
+func (e *Engine) Load(slot int, soundFileName string) err {
+	e.Lock()
+	defer e.Unlock()
+
+	if table, err := NewTable(soundFileName); err != nil {
+		return err
+	}
+
+	e.tables[slot] = table
 }
 
 // trigger playback of a table
