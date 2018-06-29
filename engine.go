@@ -12,6 +12,20 @@ should we have 4 methods 1-1 for the above functionality or
 2 methods, open/close or start/stop which each do 2 of the functions above
 this library isn't meant to be streaming to multple devices, so we don't need multiple
 stream control really
+
+
+SOLUTIONS
+	all the setters can swiftly write to the streamParameters object *even* when not
+	stopped.  We could just say, "to update a configuration of stream parameters,
+	the effect will only occur *after* you've stopped the stream."  our Start()
+	will then always open/start a portaudio stream, and our Stop() will always
+	stop/close a portaudio stream using the recently altered stream parameters.
+	This way we can avoid getting weird StreamDoesNotExist errors and CannotConfigure***
+	errors.  In summary, Setters only apply after a stream is stopped/started.
+	Close() calls portaudio.Terminate() and you can't call it multiple times (we'll flag
+	for this).  If you want to Reinitialize() portaudio, we'll provide a method to do so,
+	which you  (again) cannot call multiple times (we'll flag for this too).
+
 */
 
 const (
@@ -19,6 +33,7 @@ const (
 	CannotConfigureWhileNotInitialized error = fmt.Errorf("cannot configure engine while not initialized, must call Reinitialize() first")
 	AlreadyInitialized                 error = fmt.Errorf("already initialized engine")
 	AlreadyStarted                     error = fmt.Errorf("already started engine")
+	StreamDoesNotExist                 error = fmt.Errorf("stream does not exist")
 )
 
 // engine is a type which maintains structural information
@@ -161,6 +176,9 @@ func (e *Engine) SetDevice(deviceInfo *portaudio.DeviceInfo) error {
 	// create a new (low latency) stream parameter configuration (for the new device)
 	// hopefully you passed in an output device, otherwise Start() explodes later)
 	streamParameters := portaudio.LowLatencyParameters(nil, deviceInfo)
+	// copy the relevant old stream parameter values into the new stream parameter values
+	streamParameters.SampleRate = e.streamParameters.SampleRate
+	streamParameters.FramesPerBuffer = e.streamParameters.FramesPerBuffer
 	// force stereo
 	// the output device *must* support stereo (otherwise this entire library will not work)
 	// if it doesn't support stereo, well, you'll find out when Start() is called won't you
@@ -170,12 +188,8 @@ func (e *Engine) SetDevice(deviceInfo *portaudio.DeviceInfo) error {
 	return nil
 }
 
-// open and start an audio stream to the output device
+// open *and* start an audio stream
 func (e *Engine) Start() error {
-	var (
-		err    error
-		stream *portaudio.Stream
-	)
 	// update atomically
 	e.Lock()
 	defer e.Unlock()
@@ -187,11 +201,11 @@ func (e *Engine) Start() error {
 
 	// open an (output only) stream
 	// with prior specified stream parameters & our callback
-	stream, err = portaudio.OpenStream(e.streamParameters, e.streamCallback)
+	stream, err := portaudio.OpenStream(e.streamParameters, e.streamCallback)
 	if err != nil {
 		return err
 	}
-	// otherwise the stream *opened* successfully
+	// the stream *opened* successfully
 	// now we can *start* it
 	if err = stream.Start(); err != nil {
 		return err
@@ -204,23 +218,32 @@ func (e *Engine) Start() error {
 	return nil
 }
 
-// stop & close and audio stream
+// stop *and* close an audio stream
 func (e *Engine) Stop() error {
 	// update atomically
 	e.Lock()
 	defer e.Unlock()
 
-	// try to stop the stream (if it exists ofc)
+	// check stream exists
 	if e.stream != nil {
-		if err := e.stream.Stop(); err != nil {
-			// if it failed, return the error
-			return err
-		}
+		return StreamDoesNotExist
 	}
-	// otherwise the stream stopped successfully
+
+	// try to stop the stream
+	if err := e.stream.Stop(); err != nil {
+		// if it failed, return the error
+		return err
+	}
+	// the stream stopped successfully
 	// flag that we aren't started anymore
-	// NB. we aren't deleting the stream, just stopping it
 	e.started = false
+
+	// try to close the stream
+	if err = e.stream.Close(); err != nil {
+		// if it failed, return the error
+		return err
+	}
+	e.stream = nil
 	// return without error
 	return nil
 }
