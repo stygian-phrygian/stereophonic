@@ -27,6 +27,8 @@ type Table struct {
 	sync.Mutex // lock when mutating the samples
 }
 
+// force immutability by disallowing setters
+
 func (b *Table) Name() string {
 	return b.name
 }
