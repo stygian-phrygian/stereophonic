@@ -40,6 +40,8 @@ issues:
 
 	we need a method to signal when playback is done
 
+	we really do need a filter (to avoid aliasing on pitch change)
+
 solutions?
 
 	glide could be 2 variables, a portamentoIncrement and destinationPitch variable
