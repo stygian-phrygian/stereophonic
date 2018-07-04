@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-const (
+var (
 	EngineAlreadyInitialized error = fmt.Errorf("engine is already initialized")
 	EngineNotInitialized     error = fmt.Errorf("engine isn't initialized")
 	EngineAlreadyStarted     error = fmt.Errorf("engine is already started")
@@ -21,7 +21,7 @@ const (
 // and when to begin computing them after Play() is called
 type playbackEvent struct {
 	startTimeInFrames, durationInFrames int
-	TablePlayer
+	*TablePlayer
 }
 
 // engine is a type which maintains structural information
@@ -44,7 +44,7 @@ type Engine struct {
 	// appending to this set is done by Play()
 	// removal is done automatically after the events expire through
 	// a goroutine which listens for event expiration
-	activePlaybackEvents map[playbackEvent]bool
+	activePlaybackEvents map[*playbackEvent]bool
 	// flag to check whether portaudio is initialized
 	initialized bool
 	// flag to check whether the portaudio stream started
@@ -59,7 +59,7 @@ type Engine struct {
 // acquires the default output device stream parameters with low latency configuration
 //
 // this does *not* start an audio stream , it just configures one
-func New() (*Engine, err) {
+func New() (*Engine, error) {
 
 	var (
 		err                     error
@@ -77,7 +77,7 @@ func New() (*Engine, err) {
 	}
 	// get stream parameters for the default output device
 	// we're requesting low latency parameters (gotta go fast)
-	streamParameters := portaudio.LowLatencyParameters(nil, defaultOutputDeviceInfo)
+	streamParameters = portaudio.LowLatencyParameters(nil, defaultOutputDeviceInfo)
 	// also stereo is preferred/required
 	// if it doesn't support stereo, well, you'll find out when Start() is called won't you
 	streamParameters.Output.Channels = 2
@@ -96,7 +96,7 @@ func New() (*Engine, err) {
 // this returns a listing of the portaudio device info objects
 // which you can explore at your leisure,
 // maybe for use in SetDevice(), who knows?
-func (e *Engine) ListDevices() ([]*portaudio.DeviceInfo, err) {
+func (e *Engine) ListDevices() ([]*portaudio.DeviceInfo, error) {
 	if !e.initialized {
 		return nil, EngineNotInitialized
 	}
@@ -205,7 +205,7 @@ func (e *Engine) Stop() error {
 	e.started = false
 
 	// try to close the stream
-	if err = e.stream.Close(); err != nil {
+	if err := e.stream.Close(); err != nil {
 		// if it failed, return the error
 		return err
 	}
@@ -227,7 +227,7 @@ func (e *Engine) Close() error {
 
 	// first, check if the stream exists
 	// edge case call sequence of: New() -> [stream: nil], Close()
-	if stream != nil {
+	if e.stream != nil {
 		// now, check if we are started (stream is playing currently)
 		if e.started {
 			// and stop the stream
@@ -283,20 +283,24 @@ func (e *Engine) Reopen() error {
 	// assuming we successfully initialized portaudio
 	// flag that we did so
 	e.initialized = true
+
+	return nil
 }
 
 // loads a soundfile into a sample slot
 // (which internally just loads a table with the soundfile frames,
 // then saves a reference in the engine)
-func (e *Engine) Load(slot int, soundFileName string) err {
+func (e *Engine) Load(slot int, soundFileName string) error {
 	e.Lock()
 	defer e.Unlock()
 
-	if table, err := NewTable(soundFileName); err != nil {
+	table, err := NewTable(soundFileName)
+	if err != nil {
 		return err
 	}
-
 	e.tables[slot] = table
+
+	return nil
 }
 
 // prepare/create a playback event
@@ -320,23 +324,25 @@ func (e *Engine) Prepare(slot int, startTimeInMilliseconds, durationInMillisecon
 	}
 
 	// check that the duration makes sense
-	if durationInMS <= 0.0 || startTimeInMilliseconds < 0.0 {
+	if durationInMilliseconds <= 0.0 || startTimeInMilliseconds < 0.0 {
 		return nil, InvalidDuration
 	}
 
 	// check that we have this slot
-	if table, exists := e.tables[slot]; !exists {
+	table, exists := e.tables[slot]
+	if !exists {
 		return nil, TableDoesNotExist
 	}
 
 	// (try to) create a new tableplayer (with the recently acquired table)
-	if tablePlayer, err := NewTablePlayer(table, e.streamSampleRate); err != nil {
-		return err
+	tablePlayer, err := NewTablePlayer(table, e.streamSampleRate)
+	if err != nil {
+		return nil, err
 	}
 
 	// return a playback event
-	startTimeInFrames := startTimeInMilliseconds * 0.001 * e.streamSampleRate
-	durationInFrames := durationInMilliseconds * 0.001 * e.streamSampleRate
+	startTimeInFrames := int(startTimeInMilliseconds * 0.001 * e.streamSampleRate)
+	durationInFrames := int(durationInMilliseconds * 0.001 * e.streamSampleRate)
 	return &playbackEvent{
 		startTimeInFrames,
 		durationInFrames,
@@ -367,8 +373,49 @@ func (e *Engine) Play(playbackEvents ...*playbackEvent) {
 // the callback which portaudio uses to fill the output buffer
 func (e *Engine) streamCallback(out []float32) {
 
-	for _, playbackEvent := range e.playbackEvents {
-		//TODO
+	var (
+		left, right float64
+	)
+
+	// clear the buffer before proceding (if we don't, the accumulation
+	// of prior samples creates explosive dc-offset)
+	for i, _ := range out {
+		out[i] = float32(0.0)
+	}
+
+	// calculate the frames per buffer (assuming interleaved stereo buffer)
+	framesPerBuffer := len(out) >> 1
+
+	// compute each frame from each active playback event
+	// remember our map of playbackEvents is being treated like a set
+	// hence we're iterating the *keys*
+	for playbackEvent, _ := range e.activePlaybackEvents {
+
+		// if startTimeInFrames exceeds framesPerBuffer
+		// skip framesPerBuffer frames from this playback event
+		if playbackEvent.startTimeInFrames > framesPerBuffer {
+			// update playback event
+			playbackEvent.startTimeInFrames -= framesPerBuffer
+			continue
+		}
+
+		// else startTimeInFrames is between 0 and FramesPerBuffer
+		for i := playbackEvent.startTimeInFrames << 1; i < len(out); i += 2 {
+			left, right = playbackEvent.tick()
+			out[i] += float32(left)
+			out[i+1] += float32(right)
+		}
+		// update playback event
+		playbackEvent.durationInFrames -= (framesPerBuffer - playbackEvent.startTimeInFrames)
+		playbackEvent.startTimeInFrames = 0 // <--- uhhhgh
+
+		// check if we finished playback and remove the event if we did
+		// apparently you *can* delete keys from a map during iteration
+		// see:
+		// https://stackoverflow.com/questions/23229975/is-it-safe-to-remove-selected-keys-from-golang-map-within-a-range-loop
+		if playbackEvent.durationInFrames <= 0 {
+			delete(e.activePlaybackEvents, playbackEvent)
+		}
 	}
 }
 
