@@ -327,13 +327,12 @@ func (tp *TablePlayer) ProcessReplacing(out []float64) {
 // the argument is assumed to be *stereo* interleaved samples
 func (tp *TablePlayer) Process(out []float64) {
 	var (
-		nFrames     = len(out) >> 1 // divide by 2
 		left, right float64
 	)
-	for i := 0; i < nFrames; i++ {
+	for i := 0; i < len(out); i += 2 {
 		left, right = tp.tick() // get table player's next frame
-		out[2*i] += left        // mix left
-		out[2*i+1] += right     // mix right
+		out[i] += left          // mix left
+		out[i+1] += right       // mix right
 	}
 }
 

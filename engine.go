@@ -6,46 +6,21 @@ import (
 	"sync"
 )
 
-/*
-ISSUES
-
-how to remove playback of "done" tableplayers from the activeTablePlayers
-set in Engine?
-
-what happens if we add 2 playback events with different timeToLive
-
-
-We have to rename "active" set
-
-SOLUTIONS
-
-could specify a duration in Play()?
-maybe Play() takes a tableplayer, starttime, and a duration (eerily
-similar to csound no...) and builds an Event object which is what
-is actually tracked in Engine.  An Event = a TablePlayer & a timeToLive.
-timeToLive is initially some number of frames that the playback event should
-persist (which can be decrementede every tick() or maybe every FramesPerBuffer
-ticks() of the engine)
-
-
-What is an event?  It's a starttime, duration, and source of audio.
-Instead of Prepare() we can actually just create a new Event?
-
-*/
-
 const (
 	EngineAlreadyInitialized error = fmt.Errorf("engine is already initialized")
 	EngineNotInitialized     error = fmt.Errorf("engine isn't initialized")
 	EngineAlreadyStarted     error = fmt.Errorf("engine is already started")
 	EngineNotStarted         error = fmt.Errorf("engine isn't started")
 	TableDoesNotExist        error = fmt.Errorf("table does not exist")
+	InvalidDuration          error = fmt.Errorf("invalid duration of time")
 )
 
 // a playback event is
 // a source of audio (the TablePlayer)
 // and the remaining number of audio frames left to compute/tick-off
+// and when to begin computing them after Play() is called
 type playbackEvent struct {
-	ticksRemaining int
+	startTimeInFrames, durationInFrames int
 	TablePlayer
 }
 
@@ -58,6 +33,9 @@ type Engine struct {
 	streamParameters portaudio.StreamParameters
 	// the returned "stream" object by portaudio which we can start/stop
 	stream *portaudio.Stream
+	// the sample rate of the *stream* (not necessarily what you set it as)
+	// this is a necessary variable for many audio computations
+	streamSampleRate float64
 	// mapping from a slot number -> sample (or as we call tables)
 	// this collates references to the loaded tables
 	tables map[int]*Table
@@ -105,12 +83,12 @@ func New() (*Engine, err) {
 	streamParameters.Output.Channels = 2
 
 	return &Engine{
-		streamParameters:   streamParameters, // <--- default configuration
-		stream:             nil,
-		tables:             map[int]*Table{},
-		activeTablePlayers: []*TablePlayer{},
-		initialized:        true,
-		started:            false,
+		streamParameters:     streamParameters, // <--- default configuration
+		stream:               nil,
+		tables:               map[int]*Table{},
+		activePlaybackEvents: map[*playbackEvent]bool{},
+		initialized:          true,
+		started:              false,
 	}, nil
 }
 
@@ -199,6 +177,9 @@ func (e *Engine) Start() error {
 	e.started = true
 	// save a reference to the newly created stream
 	e.stream = stream
+	// save the stream's current sample rate
+	streamInfo := stream.Info()
+	e.streamSampleRate = streamInfo.SampleRate
 	// return without error
 	return nil
 }
@@ -268,8 +249,8 @@ func (e *Engine) Close() error {
 	}
 
 	// remove the active playing tables
-	e.activeTablePlayers = nil
-	e.activeTablePlayers = []*TablePlayer{}
+	e.activePlaybackEvents = nil
+	e.activePlaybackEvents = map[*playbackEvent]bool{}
 
 	// now try to turn off portaudio
 	if err := portaudio.Terminate(); err != nil {
@@ -318,61 +299,125 @@ func (e *Engine) Load(slot int, soundFileName string) err {
 	e.tables[slot] = table
 }
 
-// prepare/create a playback event NB. this does *not* start playback
-// immediately, but allows you to configure the playback of the audio file
-// before it begins (variables like speed, offset, volume, etc)
-func (e *Engine) Prepare(slot int, durationInMilliseconds int) (*playbackEvent, error) {
+// prepare/create a playback event
+//
+// slot determines which sound file will be played back
+//
+// startTimeInMilliseconds specifies how long to wait *after* Play() *and*
+// before actual playback commences
+//
+// durationInMilliseconds specifies how long to continue playing *after*
+// actual playback commences (after startTimeInMilliseconds duration)
+//
+// NB. this does *not* start playback immediately, but allows you to configure
+// the playback before it begins (variables like speed, offset, volume, etc)
+func (e *Engine) Prepare(slot int, startTimeInMilliseconds, durationInMilliseconds float64) (*playbackEvent, error) {
+
+	// check if stream started (which is necessary
+	// to get the correct stream sample rate)
+	if !e.started {
+		return nil, EngineNotStarted
+	}
 
 	// check that the duration makes sense
-	//FIXME
+	if durationInMS <= 0.0 || startTimeInMilliseconds < 0.0 {
+		return nil, InvalidDuration
+	}
 
 	// check that we have this slot
 	if table, exists := e.tables[slot]; !exists {
 		return nil, TableDoesNotExist
 	}
-	// create a new tableplayer (with the recently acquired table)
-	if tablePlayer, err := NewTablePlayer(table); err != nil {
+
+	// (try to) create a new tableplayer (with the recently acquired table)
+	if tablePlayer, err := NewTablePlayer(table, e.streamSampleRate); err != nil {
 		return err
 	}
 
+	// return a playback event
+	startTimeInFrames := startTimeInMilliseconds * 0.001 * e.streamSampleRate
+	durationInFrames := durationInMilliseconds * 0.001 * e.streamSampleRate
 	return &playbackEvent{
-		convertMillisecondsToFrames(durationInMS),
-		tablePlayers,
-	}
+		startTimeInFrames,
+		durationInFrames,
+		tablePlayer,
+	}, nil
 
-}
-
-func (e *Engine) convertMillisecondsToFrames(durationInMilliseconds int) {
 }
 
 // triggers playback of a table player at startime for duration
-// starttime is the number of ms from now to being playback (therefore > 0)
-// duration is the time in number of ms the TablePlayer should be active
-// multiple triggers of the *exact* same TablePlayer will have no additional
+// multiple triggers of the *exact* same event (object) will have no additional
 // effect. If you want a polyphonic simulation of playing a single table, you
 // must call Prepare() for each voice
-func (e *Engine) Play(starttime, duration float64, tablePlayers ...*TablePlayer) {
-	// check that there are table players firstly
-	if tablePlayers != nil {
+func (e *Engine) Play(playbackEvents ...*playbackEvent) {
+	// check that there are playback events first
+	if playbackEvents == nil {
 		return
 	}
 
-	// add the tableplayers to the internal active players "set"
-	for _, tablePlayer := range tablePlayers {
-
+	// add the events to the internal active event "set"
+	for _, playbackEvent := range playbackEvents {
+		// remember we're treating activePlaybackEvents
+		// (which is a map) as a set
+		e.activePlaybackEvents[playbackEvent] = true
 	}
 
 }
 
 // the callback which portaudio uses to fill the output buffer
 func (e *Engine) streamCallback(out []float32) {
-	// for every output frame
-	for i := 0; i < len(out); i += 2 {
-		out[i], out[i+1] = e.tick()
+
+	for _, playbackEvent := range e.playbackEvents {
+		//TODO
 	}
 }
 
-// compute 1 frame of audio in the engine's system
-func (e *Engine) tick() (float32, float32) {
-	//TODO
-}
+/*
+ISSUES
+
+how to remove playback of "done" tableplayers from the activeTablePlayers
+set in Engine?
+
+what happens if we add 2 playback events with different timeToLive
+
+We have to rename "active" set
+
+Can you Prepare() a playbackEvent without the engine having started?  Answer:
+no, because we need to calculate the sample rate to determine the duration of
+time the event lasts, and the sample rate is only VALID after calling Start().
+Ex. if we didn't check if engine was started already during Prepare() we'd have
+an edge case where we called Start() (got a sample rate), then Stop(), changed
+SampleRate, THEN Prepare(), then Start() again, which would (possibly) have an
+invalid sample rate.  UNLESS we don't store the ticksRemaining in playbackEvent
+but the milliseconds, and only decrement this during playback... This would
+require more computation though, with each iteration of tick().  We could have
+a DoneAction thread running concurrently, which receives on a channel,
+decrement signals.  The DoneAction thread watches the activePlaybackEvents and
+removes them accordingly.  Maybe after each iteration of the playback callback,
+we can signal through a channel how much time has progressed, removing from
+activePlaybackEvents accordingly.  Could even do k-rate style updates,
+so like 10 frames, instead of a full FramesPerBuffer frames
+
+what is our TablePlayer tracks the passage of time.  Afterall, it needs
+sample rate to compute ticks, it therefore can track how long it's been playing
+
+the event type coul dhave a doneAction callback which is triggered
+when a doneEvent occurs somehow?  The DoneAction could just be
+a simple removal from the active players set
+
+
+SOLUTIONS
+
+could specify a duration in Play()?
+maybe Play() takes a tableplayer, starttime, and a duration (eerily
+similar to csound no...) and builds an Event object which is what
+is actually tracked in Engine.  An Event = a TablePlayer & a timeToLive.
+timeToLive is initially some number of frames that the playback event should
+persist (which can be decrementede every tick() or maybe every FramesPerBuffer
+ticks() of the engine)
+
+
+What is an event?  It's a starttime, duration, and source of audio.
+Instead of Prepare() we can actually just create a new Event?
+
+*/
