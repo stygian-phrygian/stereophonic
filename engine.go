@@ -27,6 +27,8 @@ type playbackEvent struct {
 // engine is a type which maintains structural information
 // related to playback and device parameters
 type Engine struct {
+	// lock (only for configuring the engine pre-playback)
+	sync.Mutex
 	// stream parameters keeps track of relevant
 	// playback variables for a stream, namely SampleRate, FramesPerBuffer,
 	// and the output device.
@@ -49,8 +51,6 @@ type Engine struct {
 	initialized bool
 	// flag to check whether the portaudio stream started
 	started bool
-	// lock (only for configuring the engine pre-playback)
-	sync.Mutex
 }
 
 // prepare an engine
@@ -316,6 +316,8 @@ func (e *Engine) Load(slot int, soundFileName string) error {
 // NB. this does *not* start playback immediately, but allows you to configure
 // the playback before it begins (variables like speed, offset, volume, etc)
 func (e *Engine) Prepare(slot int, startTimeInMilliseconds, durationInMilliseconds float64) (*playbackEvent, error) {
+	e.Lock()
+	defer e.Unlock()
 
 	// check if stream started (which is necessary
 	// to get the correct stream sample rate)
@@ -356,6 +358,9 @@ func (e *Engine) Prepare(slot int, startTimeInMilliseconds, durationInMillisecon
 // effect. If you want a polyphonic simulation of playing a single table, you
 // must call Prepare() for each voice
 func (e *Engine) Play(playbackEvents ...*playbackEvent) {
+	e.Lock()
+	defer e.Unlock()
+
 	// check that there are playback events first
 	if playbackEvents == nil {
 		return
@@ -367,7 +372,6 @@ func (e *Engine) Play(playbackEvents ...*playbackEvent) {
 		// (which is a map) as a set
 		e.activePlaybackEvents[playbackEvent] = true
 	}
-
 }
 
 // the callback which portaudio uses to fill the output buffer
@@ -421,6 +425,8 @@ func (e *Engine) streamCallback(out []float32) {
 
 /*
 ISSUES
+
+"fatal error: concurrent map writes"
 
 how to remove playback of "done" tableplayers from the activeTablePlayers
 set in Engine?
