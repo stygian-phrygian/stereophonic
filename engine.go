@@ -21,42 +21,51 @@ var (
 // when to begin computing them after Play() is called
 // a done action function to run (only once) after we've exceeded our duration
 type playbackEvent struct {
+	// startTimeInFrames is the number of frames to delay before we begin
+	// ticking from our *TablePlayer
+	// durationInFrames is how many times we tick() on the *TablePlayer
 	startTimeInFrames, durationInFrames int
-	*TablePlayer                               // <--- could abstract this into an interface... tick()?
-	doneAction                          func() // function to run once duration <= 0 (we're done)
-	ranDoneAction                       bool   // flag to determine we ran the done action already
+	// the *TablePlayer is what generates frames of audio for us...
+	// this could be abstracted perhaps into an interface with a tick()
+	*TablePlayer
+	// function to run once durationInFrames <= 0 (ie. we're done playback)
+	doneAction func()
+	// flag to determine if we ran the done action already
+	ranDoneAction bool
 }
 
-// redefine tick event to handle startTimeInFrames/durationInFrames
-// and call a done action callback (only once) after it's... uhm done.
+// redefine tick() to handle startTimeInFrames/durationInFrames
+// and call a done action (only once) after we tick() past durationInFrames
 func (p *playbackEvent) tick() (float64, float64) {
-	// decrement startTimeInFrames, returning nothing
+
 	if p.startTimeInFrames > 0 {
+		// decrement startTimeInFrames, returning nothing
 		p.startTimeInFrames -= 1
 		return 0.0, 0.0
 	}
-	// decrement startTimeInFrames, returning a tick()
+
 	if p.durationInFrames > 0 {
+		// decrement startTimeInFrames, returning a tick()
 		p.durationInFrames -= 1
 		return p.TablePlayer.tick()
 	}
-	// run the done action (once)
 	if !p.ranDoneAction {
+		// run the done action *only* once
 		p.ranDoneAction = true
 		p.doneAction()
 	}
-	// and return nothing
+	// and return nothing if we keep getting called past our durationInFrames
 	return 0.0, 0.0
 }
 
-// engine is a type which maintains structural information
+// engine is a struct which maintains structural information
 // related to playback and device parameters
 type Engine struct {
-	// lock (only for configuring the engine pre-playback)
+	// lock (only for configuring the engine pre-playback and load/delete
+	// sample slots from the system)
 	sync.Mutex
-	// stream parameters keeps track of relevant
-	// playback variables for a stream, namely SampleRate, FramesPerBuffer,
-	// and the output device.
+	// stream parameters keeps track of relevant playback variables for a
+	// stream, namely SampleRate, FramesPerBuffer, and the output device.
 	streamParameters portaudio.StreamParameters
 	// the returned "stream" object by portaudio which we can start/stop
 	stream *portaudio.Stream
@@ -67,10 +76,8 @@ type Engine struct {
 	// this collates references to the loaded tables
 	tables map[int]*Table
 	// set (really a map, cuz golang has no set datatype) of (currently)
-	// active sources of audio
-	// appending to this set is done by Play()
-	// removal is done automatically after the events expire through
-	// a goroutine which listens for event expiration
+	// active sources of audio.  the stream callback is constantly
+	// iterating the active playbackEvents calling tick() on each
 	activePlaybackEvents map[*playbackEvent]bool
 	// (buffered) channel to receive new playback events (for appending to
 	// activePlaybackEvents, avoiding a concurrent map failure of Play()
@@ -87,7 +94,7 @@ type Engine struct {
 // initializes portaudio
 // acquires the default output device stream parameters with low latency configuration
 //
-// this does *not* start an audio stream , it just configures one
+// this does *not* start an audio stream, it just configures one
 func New() (*Engine, error) {
 
 	var (
@@ -116,16 +123,15 @@ func New() (*Engine, error) {
 		stream:               nil,
 		tables:               map[int]*Table{},
 		activePlaybackEvents: map[*playbackEvent]bool{},
-		newPlaybackEvents:    make(chan *playbackEvent, 128),
+		newPlaybackEvents:    make(chan *playbackEvent, 128), // <--- magic number
 		initialized:          true,
 		started:              false,
 	}, nil
 }
 
-// list audio devices
-// this returns a listing of the portaudio device info objects
-// which you can explore at your leisure,
-// maybe for use in SetDevice(), who knows?
+// list audio devices this returns a listing of the portaudio device info
+// objects which you can explore at your leisure, maybe for use in SetDevice(),
+// who knows?
 func (e *Engine) ListDevices() ([]*portaudio.DeviceInfo, error) {
 	if !e.initialized {
 		return nil, EngineNotInitialized
@@ -133,12 +139,10 @@ func (e *Engine) ListDevices() ([]*portaudio.DeviceInfo, error) {
 	return portaudio.Devices()
 }
 
-// setters for sample rate, framesPerBuffer, and output device
-// these methods only work *before* you call Start()
-// if you call them while the engine is started, they won't have
-// any effect, you must Stop() the engine.
-// if you call them after Close(), they will return an error
-// and you must Reopen()
+// setters for sample rate, framesPerBuffer, and output device these methods
+// only work *before* you call Start() if you call them while the engine is
+// started, they won't have any effect, you must Stop() the engine.  if you
+// call them after Close(), they will return an error and you must Reopen()
 // Nota Bene:
 // these setters *wont* show you whether the values set are acceptable ;)
 func (e *Engine) SetSampleRate(sr float64) error {
@@ -243,9 +247,9 @@ func (e *Engine) Stop() error {
 	return nil
 }
 
-// should be called after you're done utilizing the Engine
-// terminates underlying portaudio
-// if you wish to resuse the Engine after Close(), call Reopen
+// close the engine, should be called after you're done utilizing it as this
+// terminates the underlying portaudio instance.  if you wish to resuse the
+// Engine after Close(), call Reopen()
 func (e *Engine) Close() error {
 	var (
 		err error
@@ -349,8 +353,9 @@ func (e *Engine) Delete(slot int) error {
 }
 
 // func which returns a func which is called when our playback event is done
-// apparently you *can* delete keys from a map during iteration
-// which is when this callback would be called, iterating the active players
+// apparently you *can* delete keys from a map during range iteration
+// (which is when this callback would be called, iterating the active players
+// and removing the "done" ones)
 // see:
 // https://stackoverflow.com/questions/23229975/is-it-safe-to-remove-selected-keys-from-golang-map-within-a-range-loop
 func (e *Engine) newDoneAction(p *playbackEvent) func() {
@@ -359,18 +364,13 @@ func (e *Engine) newDoneAction(p *playbackEvent) func() {
 	}
 }
 
-// prepare/create a playback event
-//
-// slot determines which sound file will be played back
-//
-// startTimeInMilliseconds specifies how long to wait *after* Play() *and*
-// before actual playback commences
-//
-// durationInMilliseconds specifies how long to continue playing *after*
-// actual playback commences (after startTimeInMilliseconds duration)
-//
-// NB. this does *not* start playback immediately, but allows you to configure
-// the playback before it begins (variables like speed, offset, volume, etc)
+// prepare a playback event slot determines which sound file will be played
+// back, startTimeInMilliseconds specifies how long to wait *after* Play()
+// *and* before actual playback commences, durationInMilliseconds specifies how
+// long to continue playing *after* actual playback commences (after
+// startTimeInMilliseconds duration) NB. this does *not* start playback
+// immediately, but allows you to configure the playback before it begins
+// (variables like speed, offset, volume, etc)
 func (e *Engine) Prepare(slot int, startTimeInMilliseconds, durationInMilliseconds float64) (*playbackEvent, error) {
 	e.Lock()
 	defer e.Unlock()
@@ -407,7 +407,8 @@ func (e *Engine) Prepare(slot int, startTimeInMilliseconds, durationInMillisecon
 	p.durationInFrames = durationInFrames
 	p.TablePlayer = tablePlayer
 	p.ranDoneAction = false
-	// attach a callback which removes p from activePlaybackEvents after its done
+	// attach a callback which removes this playback event from the active
+	// playback events once it's reached fulfillment
 	p.doneAction = e.newDoneAction(p)
 	return p, nil
 }
@@ -435,6 +436,7 @@ func (e *Engine) Play(playbackEvents ...*playbackEvent) {
 }
 
 // the callback which portaudio uses to fill the output buffer
+// the output buffer is assumed to be interleaved stereo format
 func (e *Engine) streamCallback(out []float32) {
 
 	var (
@@ -449,8 +451,7 @@ func (e *Engine) streamCallback(out []float32) {
 
 	// get how many new playback events there are, then append them
 	// to the active playback events set
-	q := len(e.newPlaybackEvents)
-	for i := 0; i < q; i++ {
+	for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
 		e.activePlaybackEvents[<-e.newPlaybackEvents] = true
 	}
 
@@ -465,60 +466,3 @@ func (e *Engine) streamCallback(out []float32) {
 		}
 	}
 }
-
-/*
-ISSUES
-
-
-should we have the duration and startTimeOffset in the TablePlayer itself
-or the event...?  I feel like these things should belong to the event
-and not the TablePlayer
-
-"fatal error: concurrent map writes"
-
-how to remove playback of "done" tableplayers from the activeTablePlayers
-set in Engine?
-
-what happens if we add 2 playback events with different timeToLive
-
-We have to rename "active" set
-
-Can you Prepare() a playbackEvent without the engine having started?  Answer:
-no, because we need to calculate the sample rate to determine the duration of
-time the event lasts, and the sample rate is only VALID after calling Start().
-Ex. if we didn't check if engine was started already during Prepare() we'd have
-an edge case where we called Start() (got a sample rate), then Stop(), changed
-SampleRate, THEN Prepare(), then Start() again, which would (possibly) have an
-invalid sample rate.  UNLESS we don't store the ticksRemaining in playbackEvent
-but the milliseconds, and only decrement this during playback... This would
-require more computation though, with each iteration of tick().  We could have
-a DoneAction thread running concurrently, which receives on a channel,
-decrement signals.  The DoneAction thread watches the activePlaybackEvents and
-removes them accordingly.  Maybe after each iteration of the playback callback,
-we can signal through a channel how much time has progressed, removing from
-activePlaybackEvents accordingly.  Could even do k-rate style updates,
-so like 10 frames, instead of a full FramesPerBuffer frames
-
-what is our TablePlayer tracks the passage of time.  Afterall, it needs
-sample rate to compute ticks, it therefore can track how long it's been playing
-
-the event type coul dhave a doneAction callback which is triggered
-when a doneEvent occurs somehow?  The DoneAction could just be
-a simple removal from the active players set
-
-
-SOLUTIONS
-
-could specify a duration in Play()?
-maybe Play() takes a tableplayer, starttime, and a duration (eerily
-similar to csound no...) and builds an Event object which is what
-is actually tracked in Engine.  An Event = a TablePlayer & a timeToLive.
-timeToLive is initially some number of frames that the playback event should
-persist (which can be decrementede every tick() or maybe every FramesPerBuffer
-ticks() of the engine)
-
-
-What is an event?  It's a starttime, duration, and source of audio.
-Instead of Prepare() we can actually just create a new Event?
-
-*/
