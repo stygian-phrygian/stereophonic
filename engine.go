@@ -17,11 +17,35 @@ var (
 
 // a playback event is
 // a source of audio (the TablePlayer)
-// and the remaining number of audio frames left to compute/tick-off
-// and when to begin computing them after Play() is called
+// the remaining number of audio frames left to compute/tick-off
+// when to begin computing them after Play() is called
+// a done action function to run (only once) after we've exceeded our duration
 type playbackEvent struct {
 	startTimeInFrames, durationInFrames int
 	*TablePlayer
+	doneAction    func() // function to run once duration <= 0 (we're done)
+	ranDoneAction bool   // flag to determine we ran the done action already
+}
+
+// redefine tick event to handle startTimeInFrames/durationInFrames
+func (p *playbackEvent) tick() (float64, float64) {
+	// decrement startTimeInFrames, returning nothing
+	if p.startTimeInFrames > 0 {
+		p.startTimeInFrames -= 1
+		return 0.0, 0.0
+	}
+	// decrement startTimeInFrames, returning a tick()
+	if p.durationInFrames > 0 {
+		p.durationInFrames -= 1
+		return p.TablePlayer.tick()
+	}
+	// run the done action (once)
+	if !p.ranDoneAction {
+		p.ranDoneAction = true
+		p.doneAction()
+	}
+	// and return nothing
+	return 0.0, 0.0
 }
 
 // engine is a type which maintains structural information
@@ -308,6 +332,17 @@ func (e *Engine) Load(slot int, soundFileName string) error {
 	return nil
 }
 
+// func which returns a func which is called when our playback event is done
+// apparently you *can* delete keys from a map during iteration
+// which is when this callback would be called, iterating the active players
+// see:
+// https://stackoverflow.com/questions/23229975/is-it-safe-to-remove-selected-keys-from-golang-map-within-a-range-loop
+func (e *Engine) newDoneAction(p *playbackEvent) func() {
+	return func() {
+		delete(e.activePlaybackEvents, p)
+	}
+}
+
 // prepare/create a playback event
 //
 // slot determines which sound file will be played back
@@ -350,12 +385,15 @@ func (e *Engine) Prepare(slot int, startTimeInMilliseconds, durationInMillisecon
 	// return a playback event
 	startTimeInFrames := int(startTimeInMilliseconds * 0.001 * e.streamSampleRate)
 	durationInFrames := int(durationInMilliseconds * 0.001 * e.streamSampleRate)
-	return &playbackEvent{
-		startTimeInFrames,
-		durationInFrames,
-		tablePlayer,
-	}, nil
-
+	//
+	p := &playbackEvent{}
+	p.startTimeInFrames = startTimeInFrames
+	p.durationInFrames = durationInFrames
+	p.TablePlayer = tablePlayer
+	p.ranDoneAction = false
+	// attach a callback which removes p from activePlaybackEvents after its done
+	p.doneAction = e.newDoneAction(p)
+	return p, nil
 }
 
 // triggers playback of a table player at startime for duration
@@ -390,48 +428,24 @@ func (e *Engine) streamCallback(out []float32) {
 	// clear the buffer before proceding (if we don't, the accumulation
 	// of prior samples creates explosive dc-offset)
 	for i, _ := range out {
-		out[i] = float32(0.0)
+		out[i] = 0.0
 	}
 
-	// get how many new playback events there are, then read them
-	// into the active playback events set
+	// get how many new playback events there are, then append them
+	// to the active playback events set
 	q := len(e.newPlaybackEvents)
 	for i := 0; i < q; i++ {
 		e.activePlaybackEvents[<-e.newPlaybackEvents] = true
 	}
 
-	// calculate the frames per buffer (assuming interleaved stereo buffer)
-	framesPerBuffer := len(out) >> 1
-
 	// compute each frame from each active playback event
 	// remember our map of playbackEvents is being treated like a set
 	// hence we're iterating the *keys* of the map
 	for playbackEvent, _ := range e.activePlaybackEvents {
-
-		// if startTimeInFrames exceeds framesPerBuffer
-		// skip framesPerBuffer frames from this playback event
-		if playbackEvent.startTimeInFrames > framesPerBuffer {
-			// update playback event
-			playbackEvent.startTimeInFrames -= framesPerBuffer
-			continue
-		}
-
-		// else startTimeInFrames is between 0 and FramesPerBuffer
-		for i := playbackEvent.startTimeInFrames << 1; i < len(out); i += 2 {
+		for i := 0; i < len(out); i += 2 {
 			left, right = playbackEvent.tick()
 			out[i] += float32(left)
 			out[i+1] += float32(right)
-		}
-		// update playback event
-		playbackEvent.durationInFrames -= (framesPerBuffer - playbackEvent.startTimeInFrames)
-		playbackEvent.startTimeInFrames = 0 // <--- uhhhgh
-
-		// check if we finished playback and remove the event if we did
-		// apparently you *can* delete keys from a map during iteration
-		// see:
-		// https://stackoverflow.com/questions/23229975/is-it-safe-to-remove-selected-keys-from-golang-map-within-a-range-loop
-		if playbackEvent.durationInFrames <= 0 {
-			delete(e.activePlaybackEvents, playbackEvent)
 		}
 	}
 }
