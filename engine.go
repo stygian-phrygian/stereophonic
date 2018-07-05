@@ -22,12 +22,13 @@ var (
 // a done action function to run (only once) after we've exceeded our duration
 type playbackEvent struct {
 	startTimeInFrames, durationInFrames int
-	*TablePlayer
-	doneAction    func() // function to run once duration <= 0 (we're done)
-	ranDoneAction bool   // flag to determine we ran the done action already
+	*TablePlayer                               // <--- could abstract this into an interface... tick()?
+	doneAction                          func() // function to run once duration <= 0 (we're done)
+	ranDoneAction                       bool   // flag to determine we ran the done action already
 }
 
 // redefine tick event to handle startTimeInFrames/durationInFrames
+// and call a done action callback (only once) after it's... uhm done.
 func (p *playbackEvent) tick() (float64, float64) {
 	// decrement startTimeInFrames, returning nothing
 	if p.startTimeInFrames > 0 {
@@ -328,6 +329,21 @@ func (e *Engine) Load(slot int, soundFileName string) error {
 		return err
 	}
 	e.tables[slot] = table
+
+	return nil
+}
+
+// deletes a soundfile from a sample slot
+func (e *Engine) Delete(slot int) error {
+	e.Lock()
+	defer e.Unlock()
+
+	// check that the slot exists
+	if _, exists := e.tables[slot]; !exists {
+		return TableDoesNotExist
+	}
+	// otherwise safely delete the table at this slot
+	delete(e.tables, slot)
 
 	return nil
 }
