@@ -47,6 +47,10 @@ type Engine struct {
 	// removal is done automatically after the events expire through
 	// a goroutine which listens for event expiration
 	activePlaybackEvents map[*playbackEvent]bool
+	// (buffered) channel to receive new playback events (for appending to
+	// activePlaybackEvents, avoiding a concurrent map failure of Play()
+	// directly accessing activePlaybackEvents while the stream is active
+	newPlaybackEvents chan *playbackEvent
 	// flag to check whether portaudio is initialized
 	initialized bool
 	// flag to check whether the portaudio stream started
@@ -87,6 +91,7 @@ func New() (*Engine, error) {
 		stream:               nil,
 		tables:               map[int]*Table{},
 		activePlaybackEvents: map[*playbackEvent]bool{},
+		newPlaybackEvents:    make(chan *playbackEvent, 128),
 		initialized:          true,
 		started:              false,
 	}, nil
@@ -368,9 +373,10 @@ func (e *Engine) Play(playbackEvents ...*playbackEvent) {
 
 	// add the events to the internal active event "set"
 	for _, playbackEvent := range playbackEvents {
-		// remember we're treating activePlaybackEvents
-		// (which is a map) as a set
-		e.activePlaybackEvents[playbackEvent] = true
+		// queue the playback event (shouldn't block, because the
+		// channel is buffered with a large (magic) number unlikely
+		// to be surpassed for audio applications...)
+		e.newPlaybackEvents <- playbackEvent
 	}
 }
 
@@ -387,12 +393,19 @@ func (e *Engine) streamCallback(out []float32) {
 		out[i] = float32(0.0)
 	}
 
+	// get how many new playback events there are, then read them
+	// into the active playback events set
+	q := len(e.newPlaybackEvents)
+	for i := 0; i < q; i++ {
+		e.activePlaybackEvents[<-e.newPlaybackEvents] = true
+	}
+
 	// calculate the frames per buffer (assuming interleaved stereo buffer)
 	framesPerBuffer := len(out) >> 1
 
 	// compute each frame from each active playback event
 	// remember our map of playbackEvents is being treated like a set
-	// hence we're iterating the *keys*
+	// hence we're iterating the *keys* of the map
 	for playbackEvent, _ := range e.activePlaybackEvents {
 
 		// if startTimeInFrames exceeds framesPerBuffer
@@ -425,6 +438,11 @@ func (e *Engine) streamCallback(out []float32) {
 
 /*
 ISSUES
+
+
+should we have the duration and startTimeOffset in the TablePlayer itself
+or the event...?  I feel like these things should belong to the event
+and not the TablePlayer
 
 "fatal error: concurrent map writes"
 
