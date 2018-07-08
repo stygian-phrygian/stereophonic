@@ -97,7 +97,7 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 		loopEnd:        t.nFrames - 1,
 	}
 	// correct possible sample rate mismatch between the table and the table player
-	tp.Speed(1.0)
+	tp.SetSpeed(1.0)
 
 	return tp, nil
 }
@@ -206,8 +206,8 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	return left, right
 }
 
-// set looping mode
-func (tp *TablePlayer) Looping(loopingOn bool) {
+// set looping mode, true => looping on, false => looping off
+func (tp *TablePlayer) SetLooping(loopingOn bool) {
 	if loopingOn {
 		tp.donePlayback = false
 	}
@@ -218,7 +218,7 @@ func (tp *TablePlayer) Looping(loopingOn bool) {
 // set start/end
 // where start/end are in the range [0, 1)
 // and start < end
-func (tp *TablePlayer) Slice(start, end float64) {
+func (tp *TablePlayer) SetSlice(start, end float64) {
 
 	// clamp start/end in range [0, 1)
 	start = math.Min(math.Max(0, start), 1.0)
@@ -248,7 +248,7 @@ func (tp *TablePlayer) Slice(start, end float64) {
 //
 // NB. this code allows one to create loop points that are larger than the
 // start/end points which is kind of weird... but I'll allow it.
-func (tp *TablePlayer) LoopSlice(loopStart, loopEnd float64) {
+func (tp *TablePlayer) SetLoopSlice(loopStart, loopEnd float64) {
 
 	// clamp start/end in range [0, 1)
 	loopStart = math.Min(math.Max(0, loopStart), 1.0)
@@ -288,41 +288,17 @@ func (tp *TablePlayer) Trigger() {
 	}
 }
 
-// return next len(out) samples from the TablePlayer,
-// *overwriting* whatever is in out already
-// the argument is assumed to be *stereo* interleaved samples
-func (tp *TablePlayer) ProcessReplacing(out []float64) {
-	var nFrames = len(out) >> 1 // divide by 2
-	for i := 0; i < nFrames; i++ {
-		out[2*i], out[2*i+1] = tp.tick()
-	}
-}
-
-// return next len(out) samples from the TablePlayer,
-// *mixing* with whatever is in there already
-// the argument is assumed to be *stereo* interleaved samples
-func (tp *TablePlayer) Process(out []float64) {
-	var (
-		left, right float64
-	)
-	for i := 0; i < len(out); i += 2 {
-		left, right = tp.tick() // get table player's next frame
-		out[i] += left          // mix left
-		out[i+1] += right       // mix right
-	}
-}
-
-func (tp *TablePlayer) DCOffset(dc float64) {
+func (tp *TablePlayer) SetDCOffset(dc float64) {
 	tp.dcOffset = dc
 }
 
-// specify the amplitude of the TablePlayer using decibels (0dBFS)
-// ex. tp.DB(6.0)  // => 6db increase in volume
-// ex. tp.DB(-3.0) // => 3db decrease in volume
-// ex. tp.DB(0.0)  // => 0db (no change in volume)
+// specify the gain of the TablePlayer using decibels (0dBFS)
+// ex. tp.SetGain(6.0)  // => 6db increase in volume
+// ex. tp.SetGain(-3.0) // => 3db decrease in volume
+// ex. tp.SetGain(0.0)  // => 0db (no change in volume)
 // awesome brief discussion here:
 //   https://sound.stackexchange.com/a/25533
-func (tp *TablePlayer) DB(db float64) {
+func (tp *TablePlayer) SetGain(db float64) {
 	// db        = 20*log10(amplitude/1.0)
 	// amplitude = 10^(db/20)
 	tp.amplitude = math.Pow(10, db*0.05)
@@ -330,7 +306,7 @@ func (tp *TablePlayer) DB(db float64) {
 
 // adjust playback rate of the table
 // only accepts values > 0
-func (tp *TablePlayer) Speed(speed float64) {
+func (tp *TablePlayer) SetSpeed(speed float64) {
 	// if speed is an acceptable value
 	if speed > 0.0 {
 		// handle cases where playback is forwards/reverse
