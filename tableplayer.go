@@ -24,32 +24,8 @@ import (
 // the speed (pitch), amplitude, dc-offset, start/end points,
 // as well as loop-start/loop-end points, forwards and reverse playback,
 // sample-offset
-//TODO: glide, distortion/bitcrush,  attack-hold-decay
+// TODO maybe implement: glide, distortion/bitcrush,  attack-hold-decay
 //
-/*
-
-issues:
-	how to have a glide() and speed() function
-	integrate Trigger() with attack hold decay
-	waveshaping distortion introduces (possibly) aliased frequencies
-
-	clipping audio?  should we flatten all input outside of [-1..1]
-	thereby achieving a distortion effect.  Maybe we should instead
-	have a DB() func over an Amp() func, ie, it should change the
-	resulting amplitude logarithmically (not linearly)
-
-	we need a method to signal when playback is done
-
-	we really do need a filter (to avoid aliasing on pitch change)
-
-solutions?
-
-	glide could be 2 variables, a portamentoIncrement and destinationPitch variable
-	we stop incrementing our speed variable (by portamentoIncrement) when
-	we've reached the destination pitch
-	so to slide somewhere do: Portamento(1.0); Speed(2.0)
-	Portamento can be specified in seconds (relative to the SR)
-*/
 
 type TablePlayer struct {
 	// sample rate of the original sound file

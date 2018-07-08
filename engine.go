@@ -24,6 +24,7 @@ type playbackEvent struct {
 	// startTimeInFrames is the number of frames to delay before we begin
 	// ticking from our *TablePlayer
 	// durationInFrames is how many times we tick() on the *TablePlayer
+	// therefore, total frames = startTimeInFrames + durationInFrames
 	startTimeInFrames, durationInFrames int
 	// the *TablePlayer is what generates frames of audio for us...
 	// this could be abstracted perhaps into an interface with a tick()
