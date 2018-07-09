@@ -7,24 +7,24 @@ import (
 )
 
 // TablePlayer (obviously enough) keeps track of playback
-// within 1 table, a collection of audio frames
-// (which is itself a contiguous array of (interleaved) samples)
+// within 1 table (which is a contiguous array of (interleaved) samples)
 //
-// This is basically a wave table synthesizer for 1 (stereo output) voice
+// This is basically a wave table synthesizer for 1 (stereo output) voice,
+// and represents 1 occurence of that voice (thereafter it's intended to be
+// garbage collected)
 //
 // Currently, TablePlayer only plays Tables of mono or stereo audio.
 // Mono (1 channel) audio will be automatically converted to stereo (2 channel)
-// output (which is the only output available)
+// output (which is the only output available in the engine)
 //
 // The Table (from which audio frames are drawn) *cannot* be changed
 // after construction of a TablePlayer, although a number of playback
-// variables are modifiable in real-time.
+// variables are modifiable in real-time, as was mentioned above, this
+// struct represents *1* instance of playback for *1* table.
 //
-// namely:
+// Things which are modifiable in realtime:
 // the speed (pitch), amplitude, dc-offset, start/end points,
-// as well as loop-start/loop-end points, forwards and reverse playback,
-// sample-offset
-// TODO maybe implement: glide, distortion/bitcrush,  attack-hold-decay
+// as well as loop-start/loop-end points, forwards and reverse playback
 //
 
 type TablePlayer struct {
@@ -234,7 +234,6 @@ func (tp *TablePlayer) SetSlice(start, end float64) {
 		// check that the difference of the
 		// frame indices is >= 1
 		if d := e - s; d >= 1 {
-
 			// save the new start/end indices
 			tp.start = s
 			tp.end = e
@@ -275,6 +274,13 @@ func (tp *TablePlayer) SetLoopSlice(loopStart, loopEnd float64) {
 // (re)initialize table player for playback
 // begin playback at "start" position if forwards playback
 // begin playback at "end" position if reverse playback
+//
+// NB. if you call SetReverse(true) immediately after creation of the
+// TablePlayer, the starting phase of the table will be at 0, subsequently
+// *finishing* playback on the next tick() (as reverse playback will move
+// backwards towards 0 (and hit it instantly)).  Hence, if you want to reverse
+// right after TablePlayer creation, call SetReverse(true) *then* Trigger() to
+// fix the phase to the end of the table
 func (tp *TablePlayer) Trigger() {
 
 	if tp.phaseIncrement >= 0 {
@@ -321,15 +327,17 @@ func (tp *TablePlayer) SetSpeed(speed float64) {
 }
 
 // turn on reverse playback(if it's not already on)
-func (tp *TablePlayer) Reverse() {
-	if tp.phaseIncrement > 0.0 {
-		tp.phaseIncrement *= -1.0
-	}
-}
-
-// turn on fowards playback (if it's not already on)
-func (tp *TablePlayer) Forward() {
-	if tp.phaseIncrement < 0 {
+// NB. if you just want a one-shot reverse playback of a table, call
+// SetReverse(true); Trigger() (in that order).  You must call Trigger() to
+// inform the tableplayer that you want the phase of the table to begin at the
+// end (upon table player creation, its default phase is set at the start
+// of the table).
+func (tp *TablePlayer) SetReverse(reverseMode bool) {
+	// if forwards playback and reverseMode == true, set reverse playback
+	// or
+	// if reverse playback and reverseMode == false, set foward playback
+	if (tp.phaseIncrement > 0 && reverseMode == true) ||
+		(tp.phaseIncrement < 0 && reverseMode == false) {
 		tp.phaseIncrement *= -1.0
 	}
 }

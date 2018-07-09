@@ -452,6 +452,9 @@ func (e *Engine) streamCallback(out []float32) {
 
 	// get how many new playback events there are, then append them
 	// to the active playback events set
+	// when playback events reach a "done" state, they remove themselves
+	// from activePlaybackEvents on the final call to their tick(), as was
+	// specified in the doneAction callback in Prepare()
 	for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
 		e.activePlaybackEvents[<-e.newPlaybackEvents] = true
 	}
