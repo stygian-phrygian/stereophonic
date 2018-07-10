@@ -36,6 +36,10 @@ type TablePlayer struct {
 	amplitude float64
 	// dc offset is added to the result of reading the table
 	dcOffset float64
+	// balance controls how much the left or right channel is dampened
+	// NB. we don't need to store a "balance" variable as the setter
+	// calculates the left/right channel multipliers
+	balanceMultiplierLeft, balanceMultiplierRight float64
 	// the frame data we read from (the Table)
 	table *Table
 	// current frame index in the table
@@ -82,10 +86,12 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 
 	// create the table player
 	tp := &TablePlayer{
-		sampleRate:     sampleRate,
-		srFactor:       srFactor,
-		amplitude:      1.0,
-		dcOffset:       0.0,
+		sampleRate:             sampleRate,
+		srFactor:               srFactor,
+		amplitude:              1.0,
+		dcOffset:               0.0,
+		balanceMultiplierLeft:  1.0,
+		balanceMultiplierRight: 1.0,
 		table:          t,
 		phase:          0.0,
 		phaseIncrement: srFactor, /* speed == 1.0 at player's sampleRate */
@@ -140,6 +146,10 @@ func (tp *TablePlayer) tick() (float64, float64) {
 		right = 0.0
 	}
 
+	// balance the signal
+	left *= tp.balanceMultiplierLeft
+	right *= tp.balanceMultiplierRight
+
 	// multiply by amplitude
 	left *= tp.amplitude
 	right *= tp.amplitude
@@ -148,12 +158,15 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	left += tp.dcOffset
 	right += tp.dcOffset
 
+	// update phase
+	tp.phase += tp.phaseIncrement
+
+	// update phase increment (this is for simulating portamento)
+	//TODO
+
 	// compute next frame index (phase)
 	// there are 4 main cases to consider:
 	// forwards, forwards-looping, reverse, reverse-looping
-
-	// update phase
-	tp.phase += tp.phaseIncrement
 
 	// check that our *next* frame index will be within bounds
 	next := int(tp.phase)
@@ -339,5 +352,28 @@ func (tp *TablePlayer) SetReverse(reverseMode bool) {
 	if (tp.phaseIncrement > 0 && reverseMode == true) ||
 		(tp.phaseIncrement < 0 && reverseMode == false) {
 		tp.phaseIncrement *= -1.0
+	}
+}
+
+// set the balance of the signal
+// -1: left (right fully muted)
+//  0: center (nothing altered)
+//  1: right (left fully muted)
+func (tp *TablePlayer) SetBalance(balance float64) {
+	// make sure balance is between -1 and 1 (inclusive)
+	if balance < -1.0 || 1.0 < balance {
+		return
+	}
+	// determine what to multiple the left/right channels by
+	switch {
+	case balance == 0.0:
+		tp.balanceMultiplierLeft = 1.0
+		tp.balanceMultiplierRight = 1.0
+	case 0.0 < balance:
+		tp.balanceMultiplierLeft = 1.0 - balance
+		tp.balanceMultiplierRight = 1.0
+	case balance < 0.0:
+		tp.balanceMultiplierLeft = 1.0
+		tp.balanceMultiplierRight = 1.0 + balance
 	}
 }

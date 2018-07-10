@@ -31,13 +31,19 @@ type playbackEvent struct {
 	*TablePlayer
 	// function to run once durationInFrames <= 0 (ie. we're done playback)
 	doneAction func()
-	// flag to determine if we ran the done action already
-	ranDoneAction bool
+	// flag to determine if we entered a done state
+	// and ran the doneAction already
+	donePlayback bool
 }
 
 // redefine tick() to handle startTimeInFrames/durationInFrames
 // and call a done action (only once) after we tick() past durationInFrames
 func (p *playbackEvent) tick() (float64, float64) {
+
+	// check that we haven't entered a "done" state
+	if p.donePlayback {
+		return 0.0, 0.0
+	}
 
 	if p.startTimeInFrames > 0 {
 		// decrement startTimeInFrames, returning nothing
@@ -50,13 +56,21 @@ func (p *playbackEvent) tick() (float64, float64) {
 		p.durationInFrames -= 1
 		return p.TablePlayer.tick()
 	}
-	if !p.ranDoneAction {
-		// run the done action *only* once
-		p.ranDoneAction = true
-		p.doneAction()
-	}
+
+	// if we've made it here, run the doneAction() (only once)
+	p.donePlayback = true
+	p.doneAction()
+
 	// and return nothing if we keep getting called past our durationInFrames
 	return 0.0, 0.0
+}
+
+// immediately put the playbackEvent into a "done" state
+func (p *playbackEvent) Done() {
+	// this is admittedly kind of a hack as it's a race condition I think
+	// but won't panic at runtime as it's not modifying any maps/slices
+	p.startTimeInFrames = 0
+	p.durationInFrames = 0
 }
 
 // engine is a struct which maintains structural information
@@ -407,7 +421,7 @@ func (e *Engine) Prepare(slot int, startTimeInMilliseconds, durationInMillisecon
 	p.startTimeInFrames = startTimeInFrames
 	p.durationInFrames = durationInFrames
 	p.TablePlayer = tablePlayer
-	p.ranDoneAction = false
+	p.donePlayback = false
 	// attach a callback which removes this playback event from the active
 	// playback events once it's reached fulfillment
 	p.doneAction = e.newDoneAction(p)
@@ -444,29 +458,58 @@ func (e *Engine) streamCallback(out []float32) {
 		left, right float64
 	)
 
-	// clear the buffer before proceding (if we don't, the accumulation
-	// of prior samples creates explosive dc-offset)
-	for i, _ := range out {
-		out[i] = 0.0
-	}
+	// for each (stereo interleaved) frame
+	for n := 0; n < len(out); n += 2 {
 
-	// get how many new playback events there are, then append them
-	// to the active playback events set
-	// when playback events reach a "done" state, they remove themselves
-	// from activePlaybackEvents on the final call to their tick(), as was
-	// specified in the doneAction callback in Prepare()
-	for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
-		e.activePlaybackEvents[<-e.newPlaybackEvents] = true
-	}
+		// check if there are new playback events recently encountered
+		// append them to the active playback events should they exist
+		for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
+			e.activePlaybackEvents[<-e.newPlaybackEvents] = true
+		}
 
-	// compute each frame from each active playback event
-	// remember our map of playbackEvents is being treated like a set
-	// hence we're iterating the *keys* of the map
-	for playbackEvent, _ := range e.activePlaybackEvents {
-		for i := 0; i < len(out); i += 2 {
+		// clear the current frame (to avoid explosive accumulation)
+		out[n] = 0.0
+		out[n+1] = 0.0
+
+		// for each event in the active playback event
+		// accumulate a frame of audio at this frame in the output buffer
+		for playbackEvent, _ := range e.activePlaybackEvents {
 			left, right = playbackEvent.tick()
-			out[i] += float32(left)
-			out[i+1] += float32(right)
+			out[n] += float32(left)
+			out[n+1] += float32(right)
 		}
 	}
+
+	//////////////////////////
+	// //  old way below
+	// //  this isn't sample accurate, and responds to events at a rate of
+	// //  FramesPerBuffer/SampleRate per second
+	// //  might be faster though, as it doesn't check for new playback
+	// //  events every frame, but only every FramesPerBuffer
+	// //
+	// //
+	// // clear the buffer before proceding (if we don't, the accumulation
+	// // of prior samples creates explosive dc-offset)
+	// for i, _ := range out {
+	// 	out[i] = 0.0
+	// }
+	// // get how many new playback events there are, then append them
+	// // to the active playback events set
+	// // when playback events reach a "done" state, they remove themselves
+	// // from activePlaybackEvents on the final call to their tick(), as was
+	// // specified in the doneAction callback in Prepare()
+	// for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
+	// 	e.activePlaybackEvents[<-e.newPlaybackEvents] = true
+	// }
+
+	// // compute each frame from each active playback event
+	// // remember our map of playbackEvents is being treated like a set
+	// // hence we're iterating the *keys* of the map
+	// for playbackEvent, _ := range e.activePlaybackEvents {
+	// 	for i := 0; i < len(out); i += 2 {
+	// 		left, right = playbackEvent.tick()
+	// 		out[i] += float32(left)
+	// 		out[i+1] += float32(right)
+	// 	}
+	// }
 }
