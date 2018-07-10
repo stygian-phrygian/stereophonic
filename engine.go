@@ -21,11 +21,11 @@ var (
 // when to begin computing them after Play() is called
 // a done action function to run (only once) after we've exceeded our duration
 type playbackEvent struct {
-	// startTimeInFrames is the number of frames to delay before we begin
+	// delayInFrames is the number of frames to delay before we begin
 	// ticking from our *TablePlayer
 	// durationInFrames is how many times we tick() on the *TablePlayer
-	// therefore, total frames = startTimeInFrames + durationInFrames
-	startTimeInFrames, durationInFrames int
+	// therefore, total frames = delayInFrames + durationInFrames
+	delayInFrames, durationInFrames int
 	// the *TablePlayer is what generates frames of audio for us...
 	// this could be abstracted perhaps into an interface with a tick()
 	*TablePlayer
@@ -36,7 +36,7 @@ type playbackEvent struct {
 	donePlayback bool
 }
 
-// redefine tick() to handle startTimeInFrames/durationInFrames
+// redefine tick() to handle delayInFrames/durationInFrames
 // and call a done action (only once) after we tick() past durationInFrames
 func (p *playbackEvent) tick() (float64, float64) {
 
@@ -45,14 +45,14 @@ func (p *playbackEvent) tick() (float64, float64) {
 		return 0.0, 0.0
 	}
 
-	if p.startTimeInFrames > 0 {
-		// decrement startTimeInFrames, returning nothing
-		p.startTimeInFrames -= 1
+	if p.delayInFrames > 0 {
+		// decrement delayInFrames, returning nothing
+		p.delayInFrames -= 1
 		return 0.0, 0.0
 	}
 
 	if p.durationInFrames > 0 {
-		// decrement startTimeInFrames, returning a tick()
+		// decrement delayInFrames, returning a tick()
 		p.durationInFrames -= 1
 		return p.TablePlayer.tick()
 	}
@@ -69,7 +69,7 @@ func (p *playbackEvent) tick() (float64, float64) {
 func (p *playbackEvent) Done() {
 	// this is admittedly kind of a hack as it's a race condition I think
 	// but won't panic at runtime as it's not modifying any maps/slices
-	p.startTimeInFrames = 0
+	p.delayInFrames = 0
 	p.durationInFrames = 0
 }
 
@@ -379,14 +379,15 @@ func (e *Engine) newDoneAction(p *playbackEvent) func() {
 	}
 }
 
-// prepare a playback event slot determines which sound file will be played
-// back, startTimeInMilliseconds specifies how long to wait *after* Play()
+// prepare a playback event.  The slot determines which sound file will be
+// played back, delayInMilliseconds specifies how long to wait *after* Play()
 // *and* before actual playback commences, durationInMilliseconds specifies how
 // long to continue playing *after* actual playback commences (after
-// startTimeInMilliseconds duration) NB. this does *not* start playback
+// delayInMilliseconds duration) NB. this does *not* start playback
 // immediately, but allows you to configure the playback before it begins
 // (variables like speed, offset, volume, etc)
-func (e *Engine) Prepare(slot int, startTimeInMilliseconds, durationInMilliseconds float64) (*playbackEvent, error) {
+//
+func (e *Engine) Prepare(slot int, delayInMilliseconds, durationInMilliseconds float64) (*playbackEvent, error) {
 	e.Lock()
 	defer e.Unlock()
 
@@ -397,7 +398,7 @@ func (e *Engine) Prepare(slot int, startTimeInMilliseconds, durationInMillisecon
 	}
 
 	// check that the duration makes sense
-	if durationInMilliseconds <= 0.0 || startTimeInMilliseconds < 0.0 {
+	if durationInMilliseconds <= 0.0 || delayInMilliseconds < 0.0 {
 		return nil, InvalidDuration
 	}
 
@@ -414,11 +415,11 @@ func (e *Engine) Prepare(slot int, startTimeInMilliseconds, durationInMillisecon
 	}
 
 	// return a playback event
-	startTimeInFrames := int(startTimeInMilliseconds * 0.001 * e.streamSampleRate)
+	delayInFrames := int(delayInMilliseconds * 0.001 * e.streamSampleRate)
 	durationInFrames := int(durationInMilliseconds * 0.001 * e.streamSampleRate)
 	//
 	p := &playbackEvent{}
-	p.startTimeInFrames = startTimeInFrames
+	p.delayInFrames = delayInFrames
 	p.durationInFrames = durationInFrames
 	p.TablePlayer = tablePlayer
 	p.donePlayback = false
