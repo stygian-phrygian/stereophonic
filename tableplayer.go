@@ -45,12 +45,19 @@ type TablePlayer struct {
 	// current frame index in the table
 	// which ranges from 0 to table.nFrames - 1
 	phase float64
-	// speed with which to increment phase
-	// (simulates pitch)
+	// speed with which to increment phase (our index into the table)
+	// we can adjust the playback rate changing this value
 	// when
 	//   phaseIncrement > 0 --> forwards playback
 	//   phaseIncrement < 0 --> reverse playback
 	phaseIncrement float64
+	// this is a destination rate of playback (phase increment)
+	// we want to acheive.  It's necessary for simulating pitch slides
+	targetPhaseIncrement float64
+	// determines how long a slide will take
+	// glide factor =  1/(glideTimeInMilliseconds/1000)*sampleRate
+	// this is always greater or equal to 0
+	glideFactor float64
 	// true  --> looping
 	// false --> one shot
 	isLooping bool
@@ -59,6 +66,8 @@ type TablePlayer struct {
 	end       int
 	loopStart int
 	loopEnd   int
+	// whether we are in reverse playback
+	reversed bool
 	// whether we are done playback (cannot be true if looping)
 	donePlayback bool
 }
@@ -92,15 +101,18 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 		dcOffset:               0.0,
 		balanceMultiplierLeft:  1.0,
 		balanceMultiplierRight: 1.0,
-		table:          t,
-		phase:          0.0,
-		phaseIncrement: srFactor, /* speed == 1.0 at player's sampleRate */
-		isLooping:      false,
-		donePlayback:   false,
-		start:          0,
-		end:            t.nFrames - 1,
-		loopStart:      0,
-		loopEnd:        t.nFrames - 1,
+		table:                t,
+		phase:                0.0,
+		phaseIncrement:       srFactor, /* speed == 1.0 at *player's* sampleRate */
+		targetPhaseIncrement: srFactor, /* where we want to eventually arrive    */
+		glideFactor:          0.0,      /* how fast we arrive there              */
+		isLooping:            false,
+		reversed:             false,
+		donePlayback:         false,
+		start:                0,
+		end:                  t.nFrames - 1,
+		loopStart:            0,
+		loopEnd:              t.nFrames - 1,
 	}
 	// correct possible sample rate mismatch between the table and the table player
 	tp.SetSpeed(1.0)
@@ -161,8 +173,35 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	// update phase
 	tp.phase += tp.phaseIncrement
 
-	// update phase increment (this is for simulating portamento)
-	//TODO
+	// update phase increment
+	// explanation:
+	// phase increment determines our rate of playback or how often the
+	// phase (table index) changes its current index in the table.  glide
+	// factor determines how *quickly* we can alter our phase increment
+	// until it reaches a target phase increment (this simulates pitch
+	// slurring).  There are 3 cases to consider, the phase increment
+	// and target phase increment being: equal, less than, or greater than
+	// one another, in the latter 2 cases, we approach the target by
+	// glide factor step amount (and correct for overshoot).
+	switch {
+	case tp.phaseIncrement == tp.targetPhaseIncrement:
+		// do nothing if we're at the target
+		break
+	case tp.phaseIncrement < tp.targetPhaseIncrement:
+		// ramp up
+		tp.phaseIncrement += tp.glideFactor
+		// correct for overshoot
+		if tp.phaseIncrement > tp.targetPhaseIncrement {
+			tp.phaseIncrement = tp.targetPhaseIncrement
+		}
+	case tp.phaseIncrement > tp.targetPhaseIncrement:
+		// ramp down
+		tp.phaseIncrement -= tp.glideFactor
+		// correct for overshoot
+		if tp.phaseIncrement < tp.targetPhaseIncrement {
+			tp.phaseIncrement = tp.targetPhaseIncrement
+		}
+	}
 
 	// compute next frame index (phase)
 	// there are 4 main cases to consider:
@@ -239,7 +278,6 @@ func (tp *TablePlayer) SetSlice(start, end float64) {
 
 	// check that start < end
 	if start < end {
-
 		// compute the new table frame indices
 		s := int(float64(tp.table.nFrames-1) * start)
 		e := int(float64(tp.table.nFrames-1) * end)
@@ -296,14 +334,14 @@ func (tp *TablePlayer) SetLoopSlice(loopStart, loopEnd float64) {
 // fix the phase to the end of the table
 func (tp *TablePlayer) Trigger() {
 
-	if tp.phaseIncrement >= 0 {
-		// if forwards playback
-		// begin playback at "start" position
-		tp.phase = float64(tp.start)
-	} else {
-		// else reverse playback
+	if tp.reversed {
+		// reverse playback
 		// begin playback at "end" position
 		tp.phase = float64(tp.end)
+	} else {
+		// forwards playback
+		// begin playback at "start" position
+		tp.phase = float64(tp.start)
 	}
 }
 
@@ -326,16 +364,41 @@ func (tp *TablePlayer) SetGain(db float64) {
 // adjust playback rate of the table
 // only accepts values > 0
 func (tp *TablePlayer) SetSpeed(speed float64) {
-	// if speed is an acceptable value
-	if speed > 0.0 {
-		// handle cases where playback is forwards/reverse
-		if tp.phaseIncrement > 0.0 {
-			// forwards playback
-			tp.phaseIncrement = speed * tp.srFactor
-		} else {
-			// reverse playback
-			tp.phaseIncrement = speed * tp.srFactor * -1.0
-		}
+	// return on unacceptable speeds
+	if speed <= 0 {
+		return
+	}
+
+	// calculate the speed (correcting for SR mismatch with the srFactor)
+	s := speed * tp.srFactor
+
+	// assign the target phase increment (the phase increment will
+	// approach this by glide factor increment/decrements)
+	tp.targetPhaseIncrement = s
+	// if there isn't a glide factor (glide factor <= 0)
+	// immediately assign phaseIncrement to targetPhaseIncrement
+	if tp.glideFactor <= 0.0 {
+		tp.phaseIncrement = s
+	}
+
+	// on reversed playback
+	// invert the direction of the phase increment & target phase increment
+	if tp.reversed {
+		tp.phaseIncrement *= -1.0
+		tp.targetPhaseIncrement *= -1.0
+	}
+
+}
+
+// set the duration of time a glide to another pitch should take
+func (tp *TablePlayer) SetGlide(g float64) {
+	if g > 0 {
+		// glide factor is how much we increment/decrement the phase
+		// increment until we approach the target phase increment
+		// yes I realize that's confusing
+		tp.glideFactor = g
+		//FIXME: g needs to be very small to have any noticeable effect
+		// ex: 0.00001
 	}
 }
 
@@ -345,13 +408,17 @@ func (tp *TablePlayer) SetSpeed(speed float64) {
 // inform the tableplayer that you want the phase of the table to begin at the
 // end (upon table player creation, its default phase is set at the start
 // of the table).
-func (tp *TablePlayer) SetReverse(reverseMode bool) {
-	// if forwards playback and reverseMode == true, set reverse playback
+func (tp *TablePlayer) SetReverse(reverseOn bool) {
+	// save it
+	tp.reversed = reverseOn
+	// if forwards playback and reverseOn == true, set reverse playback
 	// or
-	// if reverse playback and reverseMode == false, set foward playback
-	if (tp.phaseIncrement > 0 && reverseMode == true) ||
-		(tp.phaseIncrement < 0 && reverseMode == false) {
+	// if reverse playback and reverseOn == false, set foward playback
+	if (tp.phaseIncrement > 0 && reverseOn == true) ||
+		(tp.phaseIncrement < 0 && reverseOn == false) {
+		// invert all the phase increment variables
 		tp.phaseIncrement *= -1.0
+		tp.targetPhaseIncrement *= -1.0
 	}
 }
 
