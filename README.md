@@ -23,6 +23,12 @@ mixer:
     effects, probably I'll only implement delay (as other things are
     too costly to compute (glares at you, reverb), and I want this to be minimal)
 implement for TablePlayer:
-    in order of increasing difficulty to implement
-    balance, attack/decay vol env, glide, distortion, filter
+    in order of increasing importance
+    attack/decay vol env, distortion, filter
+    #
+    there is a race condition with phaseIncrement in TablePlayer, consider
+    that we run SetReverse and SetSpeed simultaneously, there's a possibility
+    that phaseIncrement will have different values concurrently, so you could
+    reverse phase increment, then it is promptly ignored in SetSpeed
+    TODO, fix the race condition, use a master channel to access the TablePlayer
 

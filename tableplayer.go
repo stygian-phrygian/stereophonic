@@ -55,9 +55,10 @@ type TablePlayer struct {
 	// we want to acheive.  It's necessary for simulating pitch slides
 	targetPhaseIncrement float64
 	// determines how long a slide will take
-	// glide factor =  1/(glideTimeInMilliseconds/1000)*sampleRate
-	// this is always greater or equal to 0
-	glideFactor float64
+	// slide factor is calculated by SetSpeed (which has an optional slide
+	// time duration argument)
+	// slideFactor is always greater or equal to 0
+	slideFactor float64
 	// true  --> looping
 	// false --> one shot
 	isLooping bool
@@ -105,7 +106,7 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 		phase:                0.0,
 		phaseIncrement:       srFactor, /* speed == 1.0 at *player's* sampleRate */
 		targetPhaseIncrement: srFactor, /* where we want to eventually arrive    */
-		glideFactor:          0.0,      /* how fast we arrive there              */
+		slideFactor:          0.0,      /* how fast we arrive there              */
 		isLooping:            false,
 		reversed:             false,
 		donePlayback:         false,
@@ -176,27 +177,27 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	// update phase increment
 	// explanation:
 	// phase increment determines our rate of playback or how often the
-	// phase (table index) changes its current index in the table.  glide
+	// phase (table index) changes its current index in the table.  slide
 	// factor determines how *quickly* we can alter our phase increment
 	// until it reaches a target phase increment (this simulates pitch
 	// slurring).  There are 3 cases to consider, the phase increment
 	// and target phase increment being: equal, less than, or greater than
 	// one another, in the latter 2 cases, we approach the target by
-	// glide factor step amount (and correct for overshoot).
+	// slide factor step amount (and correct for overshoot).
 	switch {
 	case tp.phaseIncrement == tp.targetPhaseIncrement:
 		// do nothing if we're at the target
 		break
 	case tp.phaseIncrement < tp.targetPhaseIncrement:
 		// ramp up
-		tp.phaseIncrement += tp.glideFactor
+		tp.phaseIncrement += tp.slideFactor
 		// correct for overshoot
 		if tp.phaseIncrement > tp.targetPhaseIncrement {
 			tp.phaseIncrement = tp.targetPhaseIncrement
 		}
 	case tp.phaseIncrement > tp.targetPhaseIncrement:
 		// ramp down
-		tp.phaseIncrement -= tp.glideFactor
+		tp.phaseIncrement -= tp.slideFactor
 		// correct for overshoot
 		if tp.phaseIncrement < tp.targetPhaseIncrement {
 			tp.phaseIncrement = tp.targetPhaseIncrement
@@ -362,44 +363,54 @@ func (tp *TablePlayer) SetGain(db float64) {
 }
 
 // adjust playback rate of the table
-// only accepts values > 0
-func (tp *TablePlayer) SetSpeed(speed float64) {
+// only accepts arguments > 0
+// an optional slide time (specified in seconds) is allowed
+func (tp *TablePlayer) SetSpeed(speed float64, slideTime ...float64) {
 	// return on unacceptable speeds
 	if speed <= 0 {
 		return
 	}
 
-	// calculate the speed (correcting for SR mismatch with the srFactor)
-	s := speed * tp.srFactor
+	// save the current speed
+	currentSpeed := tp.phaseIncrement
 
-	// assign the target phase increment (the phase increment will
-	// approach this by glide factor increment/decrements)
-	tp.targetPhaseIncrement = s
-	// if there isn't a glide factor (glide factor <= 0)
-	// immediately assign phaseIncrement to targetPhaseIncrement
-	if tp.glideFactor <= 0.0 {
-		tp.phaseIncrement = s
+	// calculate the target speed
+	// (correcting for SR mismatch with the srFactor)
+	targetSpeed := speed * tp.srFactor
+
+	// handle if we're in reverse playback
+	if currentSpeed < 0 {
+		targetSpeed *= -1.0
 	}
 
-	// on reversed playback
-	// invert the direction of the phase increment & target phase increment
-	if tp.reversed {
-		tp.phaseIncrement *= -1.0
-		tp.targetPhaseIncrement *= -1.0
+	// assign to target speed
+	tp.targetPhaseIncrement = targetSpeed
+
+	// assign the target speed *also* to the current phase increment
+	// NB. if there is a (valid) slide time given below
+	// we'll immediately update the current phase increment
+	tp.phaseIncrement = targetSpeed
+
+	// if we're given a slide time
+	if slideTime != nil {
+		// if the slide time is valid
+		if slideTimeInSeconds := slideTime[0]; slideTimeInSeconds > 0.0 {
+			// calculate how fast we should change to the target
+			// speed given our current speed, the slide time
+			// specified, and the sample rate
+
+			// first, reset phase increment to its original speed
+			tp.phaseIncrement = currentSpeed
+
+			// it'll take n ticks to approach our target speed
+			n := slideTimeInSeconds * tp.sampleRate
+
+			// this is how much we alter the phase increment each
+			// of the n ticks
+			tp.slideFactor = math.Abs(targetSpeed-currentSpeed) / n
+		}
 	}
 
-}
-
-// set the duration of time a glide to another pitch should take
-func (tp *TablePlayer) SetGlide(g float64) {
-	if g > 0 {
-		// glide factor is how much we increment/decrement the phase
-		// increment until we approach the target phase increment
-		// yes I realize that's confusing
-		tp.glideFactor = g
-		//FIXME: g needs to be very small to have any noticeable effect
-		// ex: 0.00001
-	}
 }
 
 // turn on reverse playback(if it's not already on)
