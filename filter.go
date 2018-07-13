@@ -1,6 +1,14 @@
 package stereophonic
 
-// a "simple" resonant 24db per octave filter algorithm
+import (
+	"math"
+)
+
+var (
+	maxCutoff float64 = math.Nextafter(1.0, 0.0)
+)
+
+// a "simple" 12db per octave resonant filter algorithm
 //
 //
 // adapted from here:
@@ -26,15 +34,15 @@ type filter struct {
 	// nb, cutoff cannot (ever) equal 1
 	cutoff, resonance float64
 	// these values are used in the actual IIR filter computation
-	feedback               float64
-	buf0, buf1, buf2, buf3 float64
+	feedback   float64
+	buf0, buf1 float64
 }
 
 func newFilter() (*filter, error) {
 
 	f := &filter{
 		filterMode: LPFilter,
-		cutoff:     0.999,
+		cutoff:     0.9999999999999999,
 		resonance:  0.0,
 	}
 
@@ -44,26 +52,21 @@ func newFilter() (*filter, error) {
 
 }
 
-// it's very critical the feedback is controlled
-// lest the filter become unstable
-// so FIXME that instability, k
 func (f *filter) calculateFeedback() {
 	f.feedback = f.resonance + f.resonance/(1.0-f.cutoff)
 }
 
 // filter the input
 func (f *filter) tick(input float64) float64 {
-	f.buf0 += f.cutoff * (input - f.buf0 + f.feedback*(f.buf0-f.buf3))
+	f.buf0 += f.cutoff * (input - f.buf0 + f.feedback*(f.buf0-f.buf1))
 	f.buf1 += f.cutoff * (f.buf0 - f.buf1)
-	f.buf2 += f.cutoff * (f.buf1 - f.buf2)
-	f.buf3 += f.cutoff * (f.buf2 - f.buf3)
 	switch f.filterMode {
 	case LPFilter:
-		return f.buf3
+		return f.buf1
 	case HPFilter:
-		return input - f.buf3
+		return input - f.buf1
 	case BPFilter:
-		return f.buf0 - f.buf3
+		return f.buf0 - f.buf1
 	default: // NoFilter
 		return input
 	}
@@ -78,14 +81,13 @@ func (f *filter) setMode(filterMode FilterMode) {
 func (f *filter) setCutoff(cutoff float64) {
 	// make sure cutoff isn't 1 (as this would create a divide
 	// by 0 error for the feedback computation)
-	if 0 <= cutoff && cutoff < 0.9999 {
-		f.cutoff = cutoff
-		f.calculateFeedback()
-	}
+	f.cutoff = math.Max(math.Min(cutoff, 0.9999999999999999), 0.0)
+	f.calculateFeedback()
 }
 
 func (f *filter) setResonance(resonance float64) {
-	if resonance >= 0 {
+	// make sure resonance is always 0 to 1
+	if 0 <= resonance && resonance <= 1 {
 		f.resonance = resonance
 		f.calculateFeedback()
 	}
