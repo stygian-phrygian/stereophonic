@@ -40,6 +40,8 @@ type TablePlayer struct {
 	// NB. we don't need to store a "balance" variable as the setter
 	// calculates the left/right channel multipliers
 	balanceMultiplierLeft, balanceMultiplierRight float64
+	// filter
+	filterLeft, filterRight *filter
 	// the frame data we read from (the Table)
 	table *Table
 	// current frame index in the table
@@ -90,6 +92,16 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 		return nil, fmt.Errorf("Cannot create a table player with samplerate: %f", sampleRate)
 	}
 
+	// create filters
+	filterLeft, err := newFilter()
+	if err != nil {
+		return nil, err
+	}
+	filterRight, err := newFilter()
+	if err != nil {
+		return nil, err
+	}
+
 	// account for possible mismatch in the
 	// table's sample rate and the table-player's sample rate
 	srFactor := t.sampleRate / sampleRate
@@ -102,18 +114,20 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 		dcOffset:               0.0,
 		balanceMultiplierLeft:  1.0,
 		balanceMultiplierRight: 1.0,
-		table:                t,
-		phase:                0.0,
-		phaseIncrement:       srFactor, /* speed == 1.0 at *player's* sampleRate */
-		targetPhaseIncrement: srFactor, /* where we want to eventually arrive    */
-		slideFactor:          0.0,      /* how fast we arrive there              */
-		isLooping:            false,
-		reversed:             false,
-		donePlayback:         false,
-		start:                0,
-		end:                  t.nFrames - 1,
-		loopStart:            0,
-		loopEnd:              t.nFrames - 1,
+		filterLeft:             filterLeft,
+		filterRight:            filterRight,
+		table:                  t,
+		phase:                  0.0,
+		phaseIncrement:         srFactor, /* speed == 1.0 at *player's* sampleRate */
+		targetPhaseIncrement:   srFactor, /* where we want to eventually arrive    */
+		slideFactor:            0.0,      /* how fast we arrive there              */
+		isLooping:              false,
+		reversed:               false,
+		donePlayback:           false,
+		start:                  0,
+		end:                    t.nFrames - 1,
+		loopStart:              0,
+		loopEnd:                t.nFrames - 1,
 	}
 	// correct possible sample rate mismatch between the table and the table player
 	tp.SetSpeed(1.0)
@@ -170,6 +184,10 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	// add dc offset
 	left += tp.dcOffset
 	right += tp.dcOffset
+
+	// filter
+	left = tp.filterLeft.tick(left)
+	right = tp.filterRight.tick(right)
 
 	// update phase
 	tp.phase += tp.phaseIncrement
@@ -454,4 +472,18 @@ func (tp *TablePlayer) SetBalance(balance float64) {
 		tp.balanceMultiplierLeft = 1.0
 		tp.balanceMultiplierRight = 1.0 + balance
 	}
+}
+
+// setters for the filter
+func (tp *TablePlayer) SetFilterMode(filterMode FilterMode) {
+	tp.filterLeft.setMode(filterMode)
+	tp.filterRight.setMode(filterMode)
+}
+func (tp *TablePlayer) SetFilterCutoff(cutoff float64) {
+	tp.filterLeft.setCutoff(cutoff)
+	tp.filterRight.setCutoff(cutoff)
+}
+func (tp *TablePlayer) SetFilterResonance(resonance float64) {
+	tp.filterLeft.setResonance(resonance)
+	tp.filterRight.setResonance(resonance)
 }
