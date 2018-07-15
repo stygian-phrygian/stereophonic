@@ -7,12 +7,12 @@ import (
 )
 
 var (
-	EngineAlreadyInitialized error = fmt.Errorf("engine is already initialized")
-	EngineNotInitialized     error = fmt.Errorf("engine isn't initialized")
-	EngineAlreadyStarted     error = fmt.Errorf("engine is already started")
-	EngineNotStarted         error = fmt.Errorf("engine isn't started")
-	TableDoesNotExist        error = fmt.Errorf("table does not exist")
-	InvalidDuration          error = fmt.Errorf("invalid duration of time")
+	errorEngineAlreadyInitialized error = fmt.Errorf("engine is already initialized")
+	errorEngineNotInitialized     error = fmt.Errorf("engine isn't initialized")
+	errorEngineAlreadyStarted     error = fmt.Errorf("engine is already started")
+	errorEngineNotStarted         error = fmt.Errorf("engine isn't started")
+	errorTableDoesNotExist        error = fmt.Errorf("table does not exist")
+	errorInvalidDuration          error = fmt.Errorf("invalid duration of time")
 )
 
 // engine is a struct which maintains structural information
@@ -91,7 +91,7 @@ func New() (*Engine, error) {
 // who knows?
 func (e *Engine) ListDevices() ([]*portaudio.DeviceInfo, error) {
 	if !e.initialized {
-		return nil, EngineNotInitialized
+		return nil, errorEngineNotInitialized
 	}
 	return portaudio.Devices()
 }
@@ -104,7 +104,7 @@ func (e *Engine) ListDevices() ([]*portaudio.DeviceInfo, error) {
 // these setters *wont* show you whether the values set are acceptable ;)
 func (e *Engine) SetSampleRate(sr float64) error {
 	if !e.initialized {
-		return EngineNotInitialized
+		return errorEngineNotInitialized
 	}
 	// update the stream parameters
 	e.streamParameters.SampleRate = sr
@@ -112,7 +112,7 @@ func (e *Engine) SetSampleRate(sr float64) error {
 }
 func (e *Engine) SetFramesPerBuffer(framesPerBuffer int) error {
 	if !e.initialized {
-		return EngineNotInitialized
+		return errorEngineNotInitialized
 	}
 	// update the stream parameters
 	e.streamParameters.FramesPerBuffer = framesPerBuffer
@@ -120,7 +120,7 @@ func (e *Engine) SetFramesPerBuffer(framesPerBuffer int) error {
 }
 func (e *Engine) SetDevice(deviceInfo *portaudio.DeviceInfo) error {
 	if !e.initialized {
-		return EngineNotInitialized
+		return errorEngineNotInitialized
 	}
 	// create a new (low latency) stream parameter configuration (for the new device)
 	// hopefully you passed in an output device, otherwise Start() explodes later)
@@ -145,12 +145,12 @@ func (e *Engine) Start() error {
 
 	// check that we are initialized
 	if !e.initialized {
-		return EngineNotInitialized
+		return errorEngineNotInitialized
 	}
 
 	// check that we aren't already started
 	if e.started {
-		return EngineAlreadyStarted
+		return errorEngineAlreadyStarted
 	}
 
 	// open an (output only) stream
@@ -183,7 +183,7 @@ func (e *Engine) Stop() error {
 
 	// check that we aren't already stopped
 	if !e.started {
-		return EngineNotStarted
+		return errorEngineNotStarted
 	}
 
 	// try to stop the stream
@@ -264,7 +264,7 @@ func (e *Engine) Reopen() error {
 
 	// firstly, check that the intialized flag is false
 	if e.initialized {
-		return EngineAlreadyInitialized
+		return errorEngineAlreadyInitialized
 	}
 
 	// now, try to initialize
@@ -301,7 +301,7 @@ func (e *Engine) Delete(slot int) error {
 
 	// check that the slot exists
 	if _, exists := e.tables[slot]; !exists {
-		return TableDoesNotExist
+		return errorTableDoesNotExist
 	}
 	// otherwise safely delete the table at this slot
 	delete(e.tables, slot)
@@ -336,18 +336,18 @@ func (e *Engine) Prepare(slot int, delayInMilliseconds, durationInMilliseconds f
 	// check if stream started (which is necessary
 	// to get the correct stream sample rate)
 	if !e.started {
-		return nil, EngineNotStarted
+		return nil, errorEngineNotStarted
 	}
 
 	// check that the duration makes sense
 	if durationInMilliseconds <= 0.0 || delayInMilliseconds < 0.0 {
-		return nil, InvalidDuration
+		return nil, errorInvalidDuration
 	}
 
 	// check that we have this slot
 	table, exists := e.tables[slot]
 	if !exists {
-		return nil, TableDoesNotExist
+		return nil, errorTableDoesNotExist
 	}
 
 	// (try to) create a new tableplayer (with the recently acquired table)
