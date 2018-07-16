@@ -201,7 +201,7 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	// slurring).  There are 3 cases to consider, the phase increment
 	// and target phase increment being: equal, less than, or greater than
 	// one another, in the latter 2 cases, we approach the target by
-	// slide factor step amount (and correct for overshoot).
+	// slide factor (and correct for overshoot).
 	switch {
 	case tp.phaseIncrement == tp.targetPhaseIncrement:
 		// do nothing if we're at the target
