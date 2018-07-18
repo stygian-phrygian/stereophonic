@@ -34,7 +34,7 @@ type filter struct {
 	buf0, buf1, buf2, buf3 float64
 }
 
-func newFilter() (*filter, error) {
+func newFilter() *filter {
 
 	f := &filter{
 		filterMode: LPFilter,
@@ -44,7 +44,7 @@ func newFilter() (*filter, error) {
 
 	f.calculateFeedback()
 
-	return f, nil
+	return f
 
 }
 
