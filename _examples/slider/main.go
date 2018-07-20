@@ -34,13 +34,13 @@ func main() {
 	}
 
 	// prepare a playback event
-	startTimeInMs := 0.0    // no offset start time
-	durationInMs := 20000.0 // 1s (1000ms) in duration
+	startTimeInSeconds := 0.0
+	durationInSeconds := 20.0
 	downSpeed := 0.5
 	upSpeed := 2.0
 	slideUp := false
 	slideTime := 3.0 // seconds
-	event, err := e.Prepare(s1, startTimeInMs, durationInMs)
+	event, err := e.Prepare(s1, startTimeInSeconds, durationInSeconds)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -73,6 +73,6 @@ func main() {
 	}()
 
 	// allow events to occur
-	fmt.Printf("\n\nPlay around for %0.2fms\n", durationInMs)
-	time.Sleep(time.Duration((durationInMs * float64(time.Millisecond))))
+	fmt.Printf("\n\nPlay around for %0.2fs\n", durationInSeconds)
+	time.Sleep(time.Duration((durationInSeconds * float64(time.Second))))
 }
