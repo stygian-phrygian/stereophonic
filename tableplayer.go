@@ -42,6 +42,10 @@ type TablePlayer struct {
 	balanceMultiplierLeft, balanceMultiplierRight float64
 	// filter
 	filterLeft, filterRight *filter
+	// amplitude envelope
+	amplitudeADSREnvelope *adsrEnvelope
+	// and whether the amplitude adsr is on
+	amplitudeADSREnvelopeOn bool
 	// the frame data we read from (the Table)
 	table *Table
 	// current frame index in the table
@@ -70,9 +74,14 @@ type TablePlayer struct {
 	loopStart int
 	loopEnd   int
 	// whether we are in reverse playback
-	reversed bool
-	// whether we are done playback (cannot be true if looping)
-	donePlayback bool
+	isReversed bool
+	// whether we are finished playback (cannot be true if looping)
+	// in a particular direction (forwards or reverse)
+	isFinished bool
+	// whether the gate is high or low (used for setting the envelopes into
+	// the attack or release stages respectively)
+	// defaults to high (true) on object creation
+	isGateOn bool
 }
 
 func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
@@ -93,11 +102,11 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 	}
 
 	// create filters
-	filterLeft, err := newFilter()
-	if err != nil {
-		return nil, err
-	}
-	filterRight, err := newFilter()
+	filterLeft := newFilter()
+	filterRight := newFilter()
+
+	// create amplitude ADSR envelope (with default values)
+	amplitudeADSREnvelope, err := newADSREnvelope(0.0, 0.0, 1.0, 0.001, sampleRate)
 	if err != nil {
 		return nil, err
 	}
@@ -108,26 +117,29 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 
 	// create the table player
 	tp := &TablePlayer{
-		sampleRate:             sampleRate,
-		srFactor:               srFactor,
-		amplitude:              1.0,
-		dcOffset:               0.0,
-		balanceMultiplierLeft:  1.0,
-		balanceMultiplierRight: 1.0,
-		filterLeft:             filterLeft,
-		filterRight:            filterRight,
-		table:                  t,
-		phase:                  0.0,
-		phaseIncrement:         srFactor, /* speed == 1.0 at *player's* sampleRate */
-		targetPhaseIncrement:   srFactor, /* where we want to eventually arrive    */
-		slideFactor:            0.0,      /* how fast we arrive there              */
-		isLooping:              false,
-		reversed:               false,
-		donePlayback:           false,
-		start:                  0,
-		end:                    t.nFrames - 1,
-		loopStart:              0,
-		loopEnd:                t.nFrames - 1,
+		sampleRate:              sampleRate,
+		srFactor:                srFactor,
+		amplitude:               1.0,
+		dcOffset:                0.0,
+		balanceMultiplierLeft:   1.0,
+		balanceMultiplierRight:  1.0,
+		filterLeft:              filterLeft,
+		filterRight:             filterRight,
+		amplitudeADSREnvelope:   amplitudeADSREnvelope,
+		amplitudeADSREnvelopeOn: false,
+		table:                t,
+		phase:                0.0,
+		phaseIncrement:       srFactor, /* speed == 1.0 at *player's* sampleRate */
+		targetPhaseIncrement: srFactor, /* where we want to eventually arrive    */
+		slideFactor:          0.0,      /* how fast we arrive there              */
+		isLooping:            false,
+		isReversed:           false,
+		isFinished:           false,
+		isGateOn:             true,
+		start:                0,
+		end:                  t.nFrames - 1,
+		loopStart:            0,
+		loopEnd:              t.nFrames - 1,
 	}
 	// correct possible sample rate mismatch between the table and the table player
 	tp.SetSpeed(1.0)
@@ -147,8 +159,9 @@ func (tp *TablePlayer) tick() (float64, float64) {
 		right float64
 	)
 
-	// check that we aren't done playback already
-	if tp.donePlayback {
+	// check if we are finished progression (forwards or backwards)
+	// if looping is on, this will be false (necessarily)
+	if tp.isFinished {
 		left = 0.0
 		right = 0.0
 		return left, right
@@ -180,6 +193,13 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	// multiply by amplitude
 	left *= tp.amplitude
 	right *= tp.amplitude
+
+	// multiple by amplitude adsr envelope (if it's on)
+	if tp.amplitudeADSREnvelopeOn {
+		a := tp.amplitudeADSREnvelope.tick()
+		left *= a
+		right *= a
+	}
 
 	// add dc offset
 	left += tp.dcOffset
@@ -262,14 +282,14 @@ func (tp *TablePlayer) tick() (float64, float64) {
 			// reset phase to end
 			tp.phase = float64(end)
 			// flag that we are finished playback
-			tp.donePlayback = true
+			tp.isFinished = true
 
 		// reverse (no looping)
 		case next < start:
 			// reset phase to start
 			tp.phase = float64(start)
 			// flag that we are finished playback
-			tp.donePlayback = true
+			tp.isFinished = true
 		}
 	}
 
@@ -280,7 +300,7 @@ func (tp *TablePlayer) tick() (float64, float64) {
 // set looping mode, true => looping on, false => looping off
 func (tp *TablePlayer) SetLooping(loopingOn bool) {
 	if loopingOn {
-		tp.donePlayback = false
+		tp.isFinished = false
 	}
 	tp.isLooping = loopingOn
 
@@ -341,7 +361,7 @@ func (tp *TablePlayer) SetLoopSlice(loopStart, loopEnd float64) {
 	}
 }
 
-// (re)initialize table player for playback
+// reset playback position
 // begin playback at "start" position if forwards playback
 // begin playback at "end" position if reverse playback
 //
@@ -353,7 +373,7 @@ func (tp *TablePlayer) SetLoopSlice(loopStart, loopEnd float64) {
 // fix the phase to the end of the table
 func (tp *TablePlayer) Trigger() {
 
-	if tp.reversed {
+	if tp.isReversed {
 		// reverse playback
 		// begin playback at "end" position
 		tp.phase = float64(tp.end)
@@ -362,6 +382,11 @@ func (tp *TablePlayer) Trigger() {
 		// begin playback at "start" position
 		tp.phase = float64(tp.start)
 	}
+}
+
+// turn the gate on/off (which sets the envelopes into attack or release
+// stages indirectly)
+func (tp *TablePlayer) SetGate(gateOn bool) {
 }
 
 func (tp *TablePlayer) SetDCOffset(dc float64) {
@@ -437,14 +462,14 @@ func (tp *TablePlayer) SetSpeed(speed float64, slideTime ...float64) {
 // inform the tableplayer that you want the phase of the table to begin at the
 // end (upon table player creation, its default phase is set at the start
 // of the table).
-func (tp *TablePlayer) SetReverse(reverseOn bool) {
+func (tp *TablePlayer) SetReverse(isReversed bool) {
 	// save it
-	tp.reversed = reverseOn
-	// if forwards playback and reverseOn == true, set reverse playback
+	tp.isReversed = isReversed
+	// if forwards playback and isReversed == true, set reverse playback
 	// or
-	// if reverse playback and reverseOn == false, set foward playback
-	if (tp.phaseIncrement > 0 && reverseOn == true) ||
-		(tp.phaseIncrement < 0 && reverseOn == false) {
+	// if reverse playback and isReversed == false, set foward playback
+	if (tp.phaseIncrement > 0 && isReversed == true) ||
+		(tp.phaseIncrement < 0 && isReversed == false) {
 		// invert all the phase increment variables
 		tp.phaseIncrement *= -1.0
 		tp.targetPhaseIncrement *= -1.0
@@ -486,4 +511,22 @@ func (tp *TablePlayer) SetFilterCutoff(cutoff float64) {
 func (tp *TablePlayer) SetFilterResonance(resonance float64) {
 	tp.filterLeft.setResonance(resonance)
 	tp.filterRight.setResonance(resonance)
+}
+
+// (amplitude) ADSR setters
+// can't use struct embedding here, as I might have multiple envelopes in the
+// future... who knows
+func (tp *TablePlayer) SetADSREnvelopeOn(on bool) {
+}
+func (tp *TablePlayer) SetAttack(attackTimeInSeconds float64) {
+	tp.amplitudeADSREnvelope.setAttack(attackTimeInSeconds)
+}
+func (tp *TablePlayer) SetDecay(decayTimeInSeconds float64) {
+	tp.amplitudeADSREnvelope.setDecay(decayTimeInSeconds)
+}
+func (tp *TablePlayer) SetSustain(sustainLevel float64) {
+	tp.amplitudeADSREnvelope.setSustain(sustainLevel)
+}
+func (tp *TablePlayer) SetRelease(releaseTimeInSeconds float64) {
+	tp.amplitudeADSREnvelope.setRelease(releaseTimeInSeconds)
 }
