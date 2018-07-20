@@ -43,9 +43,9 @@ func main() {
 			fmt.Scanln()
 
 			// prepare playback
-			delayInMs := 0.0       // no offset start time
-			durationInMs := 2000.0 // 1s (1000ms) in duration
-			event, err := e.Prepare(s1, delayInMs, durationInMs)
+			delayInSeconds := 0.0    // no offset start time
+			durationInSeconds := 2.0 // 1s (1000ms) in duration
+			event, err := e.Prepare(s1, delayInSeconds, durationInSeconds)
 			if err != nil {
 				log.Fatal(err)
 			}

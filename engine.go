@@ -3,6 +3,7 @@ package stereophonic
 import (
 	"fmt"
 	"github.com/gordonklaus/portaudio"
+	"math"
 	"sync"
 )
 
@@ -322,14 +323,17 @@ func (e *Engine) newDoneAction(p *playbackEvent) func() {
 }
 
 // prepare a playback event.  The slot determines which sound file will be
-// played back, delayInMilliseconds specifies how long to wait *after* Play()
-// *and* before actual playback commences, durationInMilliseconds specifies how
+// played back, delayInSeconds specifies how long to wait *after* Play()
+// *and* before actual playback commences, durationSeconds specifies how
 // long to continue playing *after* actual playback commences (after
-// delayInMilliseconds duration) NB. this does *not* start playback
+// delayInSeconds duration) NB. this does *not* start playback
 // immediately, but allows you to configure the playback before it begins
 // (variables like speed, offset, volume, etc)
+// delayInSeconds <= 0 are ignored
+// durationInSeconds <= 0 results in an indefinite playback event, (ie.
+// you need to invoke Done() to cease its computation)
 //
-func (e *Engine) Prepare(slot int, delayInMilliseconds, durationInMilliseconds float64) (*playbackEvent, error) {
+func (e *Engine) Prepare(slot int, delayInSeconds, durationInSeconds float64) (*playbackEvent, error) {
 	e.Lock()
 	defer e.Unlock()
 
@@ -337,11 +341,6 @@ func (e *Engine) Prepare(slot int, delayInMilliseconds, durationInMilliseconds f
 	// to get the correct stream sample rate)
 	if !e.started {
 		return nil, errorEngineNotStarted
-	}
-
-	// check that the duration makes sense
-	if durationInMilliseconds <= 0.0 || delayInMilliseconds < 0.0 {
-		return nil, errorInvalidDuration
 	}
 
 	// check that we have this slot
@@ -356,18 +355,30 @@ func (e *Engine) Prepare(slot int, delayInMilliseconds, durationInMilliseconds f
 		return nil, err
 	}
 
-	// return a playback event
-	delayInFrames := int(delayInMilliseconds * 0.001 * e.streamSampleRate)
-	durationInFrames := int(durationInMilliseconds * 0.001 * e.streamSampleRate)
+	// ignore delayInSeconds <= 0
+	delayInSeconds = math.Max(delayInSeconds, 0.0)
+	// calculate the delay/duration in frames of the playback event
+	// NB. the duration will be ignored by tick() if it's less than 0
+	// here (flagging indefinite playback)
+	delayInFrames := int(delayInSeconds * e.streamSampleRate)
+	durationInFrames := int(durationInSeconds * e.streamSampleRate)
+	indefinitePlayback := false
+	if durationInSeconds <= 0 {
+		indefinitePlayback = true
+	}
 	//
-	p := &playbackEvent{}
-	p.delayInFrames = delayInFrames
-	p.durationInFrames = durationInFrames
-	p.TablePlayer = tablePlayer
-	p.donePlayback = false
+	p := &playbackEvent{
+		delayInFrames:      delayInFrames,
+		durationInFrames:   durationInFrames,
+		TablePlayer:        tablePlayer,
+		donePlayback:       false,
+		indefinitePlayback: indefinitePlayback,
+	}
 	// attach a callback which removes this playback event from the active
 	// playback events once it's reached fulfillment
 	p.doneAction = e.newDoneAction(p)
+
+	// return a playback event
 	return p, nil
 }
 

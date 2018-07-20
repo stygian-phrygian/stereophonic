@@ -79,15 +79,15 @@ func main() {
 }
 
 func loop(e *stereophonic.Engine, slot int, steps []int) {
-	delayInMs := 0.0       // no offset start time
-	durationInMs := 1000.0 // 1s (1000ms) in duration
+	delayInSeconds := 0.0    // no offset start time
+	durationInSeconds := 1.0 // 1s
 	i := 0
 	for {
 		v := steps[i%len(steps)]
 		i += 1
 		if v != 0 {
 			// prepare event
-			event, err := e.Prepare(slot, delayInMs, durationInMs)
+			event, err := e.Prepare(slot, delayInSeconds, durationInSeconds)
 			if err != nil {
 				log.Fatal(err)
 			}
