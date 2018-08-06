@@ -1,7 +1,6 @@
 package stereophonic
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -152,7 +151,6 @@ retry:
 			p.currentState = playbackUnlimitedDuration
 			// enter release stage of the amplitude adsr
 			p.Release()
-			fmt.Printf("released!\n")
 			//
 			goto retry
 		}
