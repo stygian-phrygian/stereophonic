@@ -310,76 +310,22 @@ func (e *Engine) Delete(slot int) error {
 	return nil
 }
 
-// func which returns a func which is called when our playback event is done
-// apparently you *can* delete keys from a map during range iteration
-// (which is when this callback would be called, iterating the active players
-// and removing the "done" ones)
-// see:
+// returns a callback which "deactivates" an active event, that is to say,
+// removes the event from the active events set
+//
+// Yea it's a pretty wonky name.  But it's not a "finalizer" or "deconstructor"
+// albeit similar to a disposer pattern.  It doesn't technically garbage
+// collect the event, it just removes it from activity (or deactivates it).  The
+// event still remains however if you have reference(s) to it, losing the
+// reference should implicitly garbage collect it.
+//
+// apparently you *can* delete keys from a map during range iteration (which is
+// when this callback would be called (after the event is "released")
 // https://stackoverflow.com/questions/23229975/is-it-safe-to-remove-selected-keys-from-golang-map-within-a-range-loop
-func (e *Engine) newDoneAction(p *playbackEvent) func() {
+func (e *Engine) newPlaybackEventDeactivator(p *playbackEvent) func() {
 	return func() {
 		delete(e.activePlaybackEvents, p)
 	}
-}
-
-// prepare a playback event.  The slot determines which sound file will be
-// played back, delayInSeconds specifies how long to wait *after* Play()
-// *and* before actual playback commences, durationSeconds specifies how
-// long to continue playing *after* actual playback commences (after
-// delayInSeconds duration) NB. this does *not* start playback
-// immediately, but allows you to configure the playback before it begins
-// (variables like speed, offset, volume, etc)
-// delayInSeconds <= 0 are ignored
-// durationInSeconds <= 0 results in an indefinite playback event, (ie.
-// you need to invoke Done() to cease its computation)
-//
-func (e *Engine) Prepare(slot int, delayInSeconds, durationInSeconds float64) (*playbackEvent, error) {
-	e.Lock()
-	defer e.Unlock()
-
-	// check if stream started (which is necessary
-	// to get the correct stream sample rate)
-	if !e.started {
-		return nil, errorEngineNotStarted
-	}
-
-	// check that we have this slot
-	table, exists := e.tables[slot]
-	if !exists {
-		return nil, errorTableDoesNotExist
-	}
-
-	// (try to) create a new tableplayer (with the recently acquired table)
-	tablePlayer, err := NewTablePlayer(table, e.streamSampleRate)
-	if err != nil {
-		return nil, err
-	}
-
-	// ignore delayInSeconds <= 0
-	delayInSeconds = math.Max(delayInSeconds, 0.0)
-	// calculate the delay/duration in frames of the playback event
-	// NB. the duration will be ignored by tick() if it's less than 0
-	// here (flagging indefinite playback)
-	delayInFrames := int(delayInSeconds * e.streamSampleRate)
-	durationInFrames := int(durationInSeconds * e.streamSampleRate)
-	indefinitePlayback := false
-	if durationInSeconds <= 0 {
-		indefinitePlayback = true
-	}
-	//
-	p := &playbackEvent{
-		delayInFrames:      delayInFrames,
-		durationInFrames:   durationInFrames,
-		TablePlayer:        tablePlayer,
-		donePlayback:       false,
-		indefinitePlayback: indefinitePlayback,
-	}
-	// attach a callback which removes this playback event from the active
-	// playback events once it's reached fulfillment
-	p.doneAction = e.newDoneAction(p)
-
-	// return a playback event
-	return p, nil
 }
 
 // triggers playback of a table player at startime for duration
