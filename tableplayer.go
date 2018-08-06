@@ -74,8 +74,9 @@ type TablePlayer struct {
 	loopEnd   int
 	// whether we are in reverse playback
 	isReversed bool
-	// whether we are finished playback (cannot be true if looping)
-	// in a particular direction (forwards or reverse)
+	// whether we are finished playback (that is reached the start or end)
+	// in a particular direction (forwards or reverse).  NB. this cannot be
+	// true if we're looping
 	isFinished bool
 }
 
@@ -104,7 +105,7 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 	defaultAmplitudeADSRAttack := 0.0
 	defaultAmplitudeADSRDecay := 1.0
 	defaultAmplitudeADSRSustainLevel := 1.0
-	defaultAmplitudeADSRRelease := 0.05
+	defaultAmplitudeADSRRelease := 0.001
 	amplitudeADSREnvelope, err := newADSREnvelope(
 		defaultAmplitudeADSRAttack,
 		defaultAmplitudeADSRDecay,
@@ -166,6 +167,13 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	if tp.isFinished {
 		left = 0.0
 		right = 0.0
+		// edge case: we must still tick the amplitude adsr envelope.
+		// the doneAction (which deactivates the playback event) is
+		// only run when the amplitude adsr envelope finishes its
+		// release stage (which can only happen if tick() is called to
+		// progress it).  We can't run this critical callback otherwise.
+		tp.amplitudeADSREnvelope.tick()
+		//
 		return left, right
 	}
 
@@ -196,17 +204,10 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	left += tp.dcOffset
 	right += tp.dcOffset
 
-	// multiply by amplitude (and adsr amplitude envelope)
-	left *= tp.amplitude
-	right *= tp.amplitude
-	//FIXME
-	a := tp.amplitudeADSREnvelope.tick()
-	left *= a
-	right *= a
-
-	// balance the signal
-	left *= tp.balanceMultiplierLeft
-	right *= tp.balanceMultiplierRight
+	// multiply by amplitude, adsr amplitude envelope, and the balance
+	a := tp.amplitude * tp.amplitudeADSREnvelope.tick()
+	left *= a * tp.balanceMultiplierLeft
+	right *= a * tp.balanceMultiplierRight
 
 	// update phase
 	tp.phase += tp.phaseIncrement
