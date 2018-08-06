@@ -201,9 +201,8 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	right *= tp.amplitude
 	//FIXME
 	a := tp.amplitudeADSREnvelope.tick()
-	if a != 0.0 {
-		// fmt.Printf("%f\n", a) // DEBUG
-	}
+	left *= a
+	right *= a
 
 	// balance the signal
 	left *= tp.balanceMultiplierLeft

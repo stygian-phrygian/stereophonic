@@ -108,22 +108,22 @@ func (adsr *adsrEnvelope) setRelease(releaseTimeInSeconds float64) {
 // this is also for (re)triggering the adsr envelope
 func (adsr *adsrEnvelope) attack() {
 	// update current stage, update the multiplier, and reset current tick
-	adsr.currentStage = adsrAttackStage
 	adsr.multiplier = calculateLevelMultiplier(
 		adsrMinimumLevel,
 		1.0,
 		adsr.stage[adsrAttackStage])
+	adsr.currentStage = adsrAttackStage
 	adsr.currentTick = 0
 }
 
 // immediately enter the release stage from the beginning
 func (adsr *adsrEnvelope) release() {
 	// update current stage, update the multiplier, and reset current tick
-	adsr.currentStage = adsrReleaseStage
 	adsr.multiplier = calculateLevelMultiplier(
 		adsr.stage[adsrSustainStage],
 		adsrMinimumLevel,
 		adsr.stage[adsrReleaseStage])
+	adsr.currentStage = adsrReleaseStage
 	adsr.currentTick = 0
 }
 
@@ -229,11 +229,6 @@ func (adsr *adsrEnvelope) tick() float64 {
 		}
 	}
 	return adsr.currentLevel
-}
-
-// check if the envelope is off/released
-func (adsr *adsrEnvelope) isOff() bool {
-	return adsr.currentStage == adsrOffStage
 }
 
 // calculate the multiplier to increase/decrease

@@ -324,6 +324,7 @@ func (e *Engine) Delete(slot int) error {
 func (e *Engine) newPlaybackEventDeactivator(p *playbackEvent) func() {
 	return func() {
 		delete(e.activePlaybackEvents, p)
+		fmt.Print("deactivated!\n") // DEBUG
 	}
 }
 

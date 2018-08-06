@@ -1,6 +1,7 @@
 package stereophonic
 
 import (
+	"fmt"
 	"math"
 )
 
@@ -145,24 +146,22 @@ retry:
 			p.durationInFrames--
 			left, right = p.TablePlayer.tick()
 		} else {
-			// else there are no more frames to tick
-			// enter release stage of the amplitude adsr
-			p.Release()
 			// change playback to unlimited duration (to allow the
 			// release envelope to complete and call its doneAction
 			// successfully)
 			p.currentState = playbackUnlimitedDuration
+			// enter release stage of the amplitude adsr
+			p.Release()
+			fmt.Printf("released!\n")
 			//
 			goto retry
 		}
 
 	// on (unlimited duration)
 	case playbackUnlimitedDuration:
-		// NB. the only way to exit this state is to call the
-		// TablePlayer Release() (which will be called automatically
-		// for limited duration events (see switch case above))
 		left, right = p.TablePlayer.tick()
 
+	// on delayed playback
 	case playbackDelay:
 		// if there are (delay) frames to tick
 		if p.delayInFrames > 0 {
