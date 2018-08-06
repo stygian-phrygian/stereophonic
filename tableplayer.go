@@ -40,11 +40,21 @@ type TablePlayer struct {
 	// NB. we don't need to store a "balance" variable as the setter
 	// calculates the left/right channel multipliers
 	balanceMultiplierLeft, balanceMultiplierRight float64
-	// filter (we need 2 of them for the stereo playback, as the filters
+	// amplitude envelope (when release occurs on this adsr, the doneAction
+	// of the playback event is run (removing it from the active playback
+	// events of the engine)
+	amplitudeADSREnvelope *adsrEnvelope
+	// filters (we need 2 of them for the stereo playback, as the filters
 	// only operate on a single channel themselves)
 	filterLeft, filterRight *filter
-	// amplitude envelope
-	amplitudeADSREnvelope *adsrEnvelope
+	// flag whether the filter envelope is on (avoids unnecessary computation)
+	filterEnvelopeOn bool
+	// filter cutoff & depth (used *only* when the filter envelope is on)
+	// set filter depth to negative 1 to invert the envelope
+	filterCutoff, filterEnvelopeDepth float64
+	// filter cutoff envelope
+	// (look inside tick() to see how the above filter variables are used)
+	filterADSREnvelope *adsrEnvelope
 	// the frame data we read from (the Table)
 	table *Table
 	// current frame index in the table
@@ -116,6 +126,22 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 		return nil, err
 	}
 
+	// create filter cutoff ADSR envelope (with default values)
+	defaultFilterEnvelopeDepth := 0.5
+	defaultFilterADSRAttack := 0.0
+	defaultFilterADSRDecay := 1.0
+	defaultFilterADSRSustainLevel := 1.0
+	defaultFilterADSRRelease := 0.001
+	filterADSREnvelope, err := newADSREnvelope(
+		defaultFilterADSRAttack,
+		defaultFilterADSRDecay,
+		defaultFilterADSRSustainLevel,
+		defaultFilterADSRRelease,
+		sampleRate)
+	if err != nil {
+		return nil, err
+	}
+
 	// account for possible mismatch in the
 	// table's sample rate and the table-player's sample rate
 	srFactor := t.sampleRate / sampleRate
@@ -131,18 +157,21 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 		filterLeft:             filterLeft,
 		filterRight:            filterRight,
 		amplitudeADSREnvelope:  amplitudeADSREnvelope,
-		table:                t,
-		phase:                0.0,
-		phaseIncrement:       srFactor, /* speed == 1.0 at *player's* sampleRate */
-		targetPhaseIncrement: srFactor, /* where we want to eventually arrive    */
-		slideFactor:          0.0,      /* how fast we arrive there              */
-		isLooping:            false,
-		isReversed:           false,
-		isFinished:           false,
-		start:                0,
-		end:                  t.nFrames - 1,
-		loopStart:            0,
-		loopEnd:              t.nFrames - 1,
+		filterADSREnvelope:     filterADSREnvelope,
+		filterEnvelopeOn:       false,
+		filterEnvelopeDepth:    defaultFilterEnvelopeDepth,
+		table:                  t,
+		phase:                  0.0,
+		phaseIncrement:         srFactor, /* speed == 1.0 at *player's* sampleRate */
+		targetPhaseIncrement:   srFactor, /* where we want to eventually arrive    */
+		slideFactor:            0.0,      /* how fast we arrive there              */
+		isLooping:              false,
+		isReversed:             false,
+		isFinished:             false,
+		start:                  0,
+		end:                    t.nFrames - 1,
+		loopStart:              0,
+		loopEnd:                t.nFrames - 1,
 	}
 	// correct possible sample rate mismatch between the table and the table player
 	tp.SetSpeed(1.0)
@@ -173,6 +202,10 @@ func (tp *TablePlayer) tick() (float64, float64) {
 		// release stage (which can only happen if tick() is called to
 		// progress it).  We can't run this critical callback otherwise.
 		tp.amplitudeADSREnvelope.tick()
+		// tick the filter cutoff envelope too for symmetry (if it's on)
+		if tp.filterEnvelopeOn {
+			tp.filterADSREnvelope.tick()
+		}
 		//
 		return left, right
 	}
@@ -197,6 +230,15 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	}
 
 	// filter
+	//
+	// if the filter cutoff envelope is on
+	// set the filter cutoff with an envelope (this is expensive)
+	if tp.filterEnvelopeOn {
+		cutoff := tp.filterCutoff +
+			tp.filterADSREnvelope.tick()*tp.filterEnvelopeDepth
+		tp.filterLeft.setCutoff(cutoff)
+		tp.filterRight.setCutoff(cutoff)
+	}
 	left = tp.filterLeft.tick(left)
 	right = tp.filterRight.tick(right)
 
@@ -386,18 +428,20 @@ func (tp *TablePlayer) Trigger() {
 	tp.isFinished = false
 }
 
-// (re)sets the envelope to its attack stage, regardless of where it's at
+// (re)sets the envelopes to their attack stage, regardless of current stage
 func (tp *TablePlayer) Attack() {
 	tp.amplitudeADSREnvelope.attack()
+	tp.filterADSREnvelope.attack()
 }
 
-// (re)sets the envelope to its release stage, regardless of where it's at
+// (re)sets the envelopes to their release stage, regardless of current stage
 // NB, this will (possibly) remove the tableplayer from the active players if
-// it fully releases, as the amplitude adsr has a doneAction callback
-// which removes the a playback event from the active events in the engine
+// it fully releases, as the amplitude adsr (specifically) has a doneAction callback
+// which removes the playback event from the active events in the engine
 // (assuming it fully releases, that is enters an off stage)
 func (tp *TablePlayer) Release() {
 	tp.amplitudeADSREnvelope.release()
+	tp.filterADSREnvelope.release()
 }
 
 // set the DC offset (obviously)
@@ -524,10 +568,44 @@ func (tp *TablePlayer) SetFilterMode(filterMode FilterMode) {
 func (tp *TablePlayer) SetFilterCutoff(cutoff float64) {
 	tp.filterLeft.setCutoff(cutoff)
 	tp.filterRight.setCutoff(cutoff)
+	// save the filter cutoff (in case it's used for envelope computation)
+	//
+	// NB. filter.setCutoff(x) limits x automatically (which ranges the
+	// cutoff such that  0 < cutoff < 1).  Therefore, we just let it clamp
+	// the cutoff, and save what it actually returned in the TablePlayer
+	// (the left filter was arbitrarily chosen here, it doesn't matter)
+	tp.filterCutoff = tp.filterLeft.cutoff
 }
 func (tp *TablePlayer) SetFilterResonance(resonance float64) {
 	tp.filterLeft.setResonance(resonance)
 	tp.filterRight.setResonance(resonance)
+}
+
+// setters filter cutoff envelope
+
+// continuously updating the filter coefficients is expensive, hence there's an
+// option to just turn the filter cutoff envelope on/off
+func (tp *TablePlayer) SetFilterEnvelopeOn(filterEnvelopeOn bool) {
+	tp.filterEnvelopeOn = filterEnvelopeOn
+}
+
+// how much to augment the filter cutoff when the envelope is on
+func (tp *TablePlayer) SetFilterEnvelopeDepth(filterEnvelopeDepth float64) {
+	tp.filterEnvelopeDepth = filterEnvelopeDepth
+}
+
+//adsr times
+func (tp *TablePlayer) SetFilterAttack(attackTimeInSeconds float64) {
+	tp.filterADSREnvelope.setAttack(attackTimeInSeconds)
+}
+func (tp *TablePlayer) SetFilterDecay(decayTimeInSeconds float64) {
+	tp.filterADSREnvelope.setDecay(decayTimeInSeconds)
+}
+func (tp *TablePlayer) SetFilterSustain(sustainLevel float64) {
+	tp.filterADSREnvelope.setSustain(sustainLevel)
+}
+func (tp *TablePlayer) SetFilterRelease(releaseTimeInSeconds float64) {
+	tp.filterADSREnvelope.setRelease(releaseTimeInSeconds)
 }
 
 // (amplitude) ADSR setters

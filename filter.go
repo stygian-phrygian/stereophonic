@@ -80,8 +80,10 @@ func (f *filter) setMode(filterMode FilterMode) {
 // set the cutoff frequency (as a value from 0.0 < 1.0)
 // NB. never set frequency greater than or equal to 1
 func (f *filter) setCutoff(cutoff float64) {
-	// make sure cutoff isn't 1 (as this would create a divide
-	// by 0 error for the feedback computation)
+	// clamp cutoff such that:
+	// 0 <= cutoff < 1
+	// cutoff cannot be 1 as this would create a divide by 0 error for the
+	// feedback computation)
 	f.cutoff = math.Max(math.Min(cutoff, 0.9999999999999999), 0.0)
 	f.calculateFeedback()
 }
