@@ -181,33 +181,3 @@ retry:
 
 	return left, right
 }
-
-//// redefine tick() to handle delayInFrames/durationInFrames
-//// and call a done action (only once) after we tick() past durationInFrames
-////FIXME: handle indefinite events
-//func (p *playbackEvent) tick() (float64, float64) {
-
-//	// check that we haven't entered a "done" state
-//	if p.donePlayback {
-//		return 0.0, 0.0
-//	}
-
-//	if p.delayInFrames > 0 {
-//		// decrement delayInFrames, returning nothing
-//		p.delayInFrames -= 1
-//		return 0.0, 0.0
-//	}
-
-//	if p.durationInFrames > 0 {
-//		// decrement delayInFrames, returning a tick()
-//		p.durationInFrames -= 1
-//		return p.TablePlayer.tick()
-//	}
-
-//	// if we've made it here, run the doneAction() (only once)
-//	p.donePlayback = true
-//	p.doneAction()
-
-//	// and return nothing if we keep getting called past our durationInFrames
-//	return 0.0, 0.0
-//}
