@@ -43,13 +43,22 @@ func main() {
 	sustainLevel := 0.6
 	releaseTime := 3.5
 	event.SetLooping(true)
-	event.SetLoopSlice(0.0, 0.01)
+	event.SetLoopSlice(0.01, 0.035)
 	event.SetAmplitudeAttack(attackTime)
 	event.SetAmplitudeDecay(decayTime)
 	event.SetAmplitudeSustain(sustainLevel)
 	event.SetAmplitudeRelease(releaseTime)
+	event.SetFilterMode(stereophonic.HPFilter)
+	event.SetFilterCutoff(0.4)
+	event.SetFilterResonance(0.9)
+	event.SetFilterEnvelopeOn(true)
+	event.SetFilterEnvelopeDepth(-0.5) // <--- negative depth inverts the filter cutoff envelope
+	event.SetFilterAttack(attackTime * 5.0)
+	event.SetFilterDecay(decayTime * 8.0)
+	event.SetFilterSustain(sustainLevel * 0.25)
+	event.SetFilterRelease(releaseTime)
 
-	fmt.Printf("Press enter to start the sound *then* press enter again to release it\n")
+	fmt.Printf("\n\nPress enter to start the sound *then* press enter again to release it\n")
 	fmt.Scanln()
 	fmt.Printf("Starting sound with attack: %0.2f, decay: %0.2f, sustain: %0.2f, release: %0.2f\n", attackTime, decayTime, sustainLevel, releaseTime)
 	e.Play(event)
