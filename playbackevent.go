@@ -1,7 +1,6 @@
 package stereophonic
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -143,9 +142,8 @@ retry:
 		// if there are frames to tick
 		if p.durationInFrames > 0 {
 			// tick them (and decrement remaining ticks)
-			fmt.Printf("%d\n", p.durationInFrames) //DEBUG
 			p.durationInFrames--
-			left, right = p.tick()
+			left, right = p.TablePlayer.tick()
 		} else {
 			// else there are no more frames to tick
 			// enter release stage of the amplitude adsr
@@ -163,7 +161,7 @@ retry:
 		// NB. the only way to exit this state is to call the
 		// TablePlayer Release() (which will be called automatically
 		// for limited duration events (see switch case above))
-		left, right = p.tick()
+		left, right = p.TablePlayer.tick()
 
 	case playbackDelay:
 		// if there are (delay) frames to tick
