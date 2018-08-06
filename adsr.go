@@ -47,30 +47,27 @@ type adsrEnvelope struct {
 	sampleRate float64
 	// the done action callback (called after the release stage finishes)
 	doneAction func()
-	// flag to determine if we've run the doneAction already (it should
-	// only be run a single time)
-	ranDoneAction bool
 }
 
 // setters
 func (adsr *adsrEnvelope) setAttack(attackTimeInSeconds float64) {
-	a := math.Floor(math.Max(attackTimeInSeconds*adsr.sampleRate, 0.0))
-	adsr.stage[adsrAttackStage] = a
+	attackTimeInFrames := math.Floor(math.Max(attackTimeInSeconds*adsr.sampleRate, 0.0))
+	adsr.stage[adsrAttackStage] = attackTimeInFrames
 	// [edge case] if we're in the same stage currently, fix the multiplier
 	if adsr.currentStage == adsrAttackStage {
 		// calculate the discrepancy of ticks left to compute
-		ticksLeft := a - float64(adsr.currentTick)
+		ticksLeft := attackTimeInFrames - float64(adsr.currentTick)
 		// update multipler
 		adsr.multiplier = calculateLevelMultiplier(adsr.currentLevel, 1.0, ticksLeft)
 	}
 }
 func (adsr *adsrEnvelope) setDecay(decayTimeInSeconds float64) {
-	d := math.Floor(math.Max(decayTimeInSeconds*adsr.sampleRate, 0.0))
-	adsr.stage[adsrDecayStage] = d
+	decayTimeInFrames := math.Floor(math.Max(decayTimeInSeconds*adsr.sampleRate, 0.0))
+	adsr.stage[adsrDecayStage] = decayTimeInFrames
 	// [edge case] if we're in the same stage currently, fix the multiplier
 	if adsr.currentStage == adsrDecayStage {
 		// calculate the discrepancy of ticks left to compute
-		ticksLeft := d - float64(adsr.currentTick)
+		ticksLeft := decayTimeInFrames - float64(adsr.currentTick)
 		// update multipler
 		adsr.multiplier = calculateLevelMultiplier(adsr.currentLevel, adsr.stage[adsrSustainStage], ticksLeft)
 	}
@@ -93,12 +90,12 @@ func (adsr *adsrEnvelope) setSustain(sustainLevel float64) {
 	}
 }
 func (adsr *adsrEnvelope) setRelease(releaseTimeInSeconds float64) {
-	r := math.Floor(math.Max(releaseTimeInSeconds*adsr.sampleRate, 0.0))
-	adsr.stage[adsrReleaseStage] = r
+	releaseTimeInFrames := math.Floor(math.Max(releaseTimeInSeconds*adsr.sampleRate, 0.0))
+	adsr.stage[adsrReleaseStage] = releaseTimeInFrames
 	// [edge case] if we're in the same stage currently, fix the multiplier
 	if adsr.currentStage == adsrReleaseStage {
 		// calculate the discrepancy of ticks left to compute
-		ticksLeft := r - float64(adsr.currentTick)
+		ticksLeft := releaseTimeInFrames - float64(adsr.currentTick)
 		// update multipler
 		adsr.multiplier = calculateLevelMultiplier(adsr.currentLevel, adsrMinimumLevel, ticksLeft)
 	}
@@ -108,23 +105,23 @@ func (adsr *adsrEnvelope) setRelease(releaseTimeInSeconds float64) {
 // this is also for (re)triggering the adsr envelope
 func (adsr *adsrEnvelope) attack() {
 	// update current stage, update the multiplier, and reset current tick
+	adsr.currentStage = adsrAttackStage
+	adsr.currentTick = 0
 	adsr.multiplier = calculateLevelMultiplier(
 		adsrMinimumLevel,
 		1.0,
 		adsr.stage[adsrAttackStage])
-	adsr.currentStage = adsrAttackStage
-	adsr.currentTick = 0
 }
 
 // immediately enter the release stage from the beginning
 func (adsr *adsrEnvelope) release() {
 	// update current stage, update the multiplier, and reset current tick
+	adsr.currentStage = adsrReleaseStage
+	adsr.currentTick = 0
 	adsr.multiplier = calculateLevelMultiplier(
 		adsr.stage[adsrSustainStage],
 		adsrMinimumLevel,
 		adsr.stage[adsrReleaseStage])
-	adsr.currentStage = adsrReleaseStage
-	adsr.currentTick = 0
 }
 
 // a callback which runs when the release stage finishes
@@ -170,8 +167,9 @@ func newADSREnvelope(
 	return adsr, nil
 }
 
-// compute another tick of the envelope
+// compute a tick of the envelope generator
 func (adsr *adsrEnvelope) tick() float64 {
+
 	// if we're *not* in the off stage or the sustain stage
 	if adsr.currentStage != adsrOffStage && adsr.currentStage != adsrSustainStage {
 		// if there are ticks left in this stage
@@ -194,34 +192,25 @@ func (adsr *adsrEnvelope) tick() float64 {
 					1.0,
 					adsr.stage[adsrSustainStage],
 					adsr.stage[adsrDecayStage])
-
+				// NB, when adsr attack time is very small
+				// (around 0s) the attack stage does not have
+				// sufficient duration to ramp up the peak adsr
+				// level (of 1.) hence we just set it to 1 now.
+				adsr.currentLevel = 1.0
 			case adsrDecayStage:
 				// decay -> sustain
 				adsr.currentStage = adsrSustainStage
 				// update the multiplier (for sustain stage)
 				adsr.multiplier = adsr.stage[adsrSustainStage]
-
-			case adsrSustainStage:
-				// sustain -> release
-				adsr.currentStage = adsrReleaseStage
-				// update the multiplier (for release stage)
-				adsr.multiplier = calculateLevelMultiplier(
-					adsr.stage[adsrSustainStage],
-					adsrMinimumLevel,
-					adsr.stage[adsrReleaseStage])
-
 			case adsrReleaseStage:
 				// release -> off
 				adsr.currentStage = adsrOffStage
 				// update the multiplier (for off stage)
 				adsr.currentLevel = adsrMinimumLevel
-				// run the done action (if exists, only once)
-				if (adsr.doneAction != nil) && (!adsr.ranDoneAction) {
+				// run the done action
+				if adsr.doneAction != nil {
 					adsr.doneAction()
-					adsr.ranDoneAction = true
 				}
-				//
-
 			// we shouldn't get here ever
 			default:
 				//do nothing
