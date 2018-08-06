@@ -40,12 +40,11 @@ type TablePlayer struct {
 	// NB. we don't need to store a "balance" variable as the setter
 	// calculates the left/right channel multipliers
 	balanceMultiplierLeft, balanceMultiplierRight float64
-	// filter
+	// filter (we need 2 of them for the stereo playback, as the filters
+	// only operate on a single channel themselves)
 	filterLeft, filterRight *filter
 	// amplitude envelope
 	amplitudeADSREnvelope *adsrEnvelope
-	// and whether the amplitude adsr is on
-	amplitudeADSREnvelopeOn bool
 	// the frame data we read from (the Table)
 	table *Table
 	// current frame index in the table
@@ -78,10 +77,6 @@ type TablePlayer struct {
 	// whether we are finished playback (cannot be true if looping)
 	// in a particular direction (forwards or reverse)
 	isFinished bool
-	// whether the gate is high or low (used for setting the envelopes into
-	// the attack or release stages respectively)
-	// defaults to high (true) on object creation
-	isGateOn bool
 }
 
 func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
@@ -106,7 +101,16 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 	filterRight := newFilter()
 
 	// create amplitude ADSR envelope (with default values)
-	amplitudeADSREnvelope, err := newADSREnvelope(0.0, 0.0, 1.0, 0.001, sampleRate)
+	defaultAmplitudeADSRAttack := 0.0
+	defaultAmplitudeADSRDecay := 1.0
+	defaultAmplitudeADSRSustainLevel := 1.0
+	defaultAmplitudeADSRRelease := 0.05
+	amplitudeADSREnvelope, err := newADSREnvelope(
+		defaultAmplitudeADSRAttack,
+		defaultAmplitudeADSRDecay,
+		defaultAmplitudeADSRSustainLevel,
+		defaultAmplitudeADSRRelease,
+		sampleRate)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +139,6 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 		isLooping:            false,
 		isReversed:           false,
 		isFinished:           false,
-		isGateOn:             true,
 		start:                0,
 		end:                  t.nFrames - 1,
 		loopStart:            0,
@@ -186,28 +189,22 @@ func (tp *TablePlayer) tick() (float64, float64) {
 		right = 0.0
 	}
 
-	// balance the signal
-	left *= tp.balanceMultiplierLeft
-	right *= tp.balanceMultiplierRight
-
-	// multiply by amplitude
-	left *= tp.amplitude
-	right *= tp.amplitude
-
-	// multiple by amplitude adsr envelope (if it's on)
-	if tp.amplitudeADSREnvelopeOn {
-		a := tp.amplitudeADSREnvelope.tick()
-		left *= a
-		right *= a
-	}
+	// filter
+	left = tp.filterLeft.tick(left)
+	right = tp.filterRight.tick(right)
 
 	// add dc offset
 	left += tp.dcOffset
 	right += tp.dcOffset
 
-	// filter
-	left = tp.filterLeft.tick(left)
-	right = tp.filterRight.tick(right)
+	// multiply by amplitude (and adsr amplitude envelope)
+	a := tp.amplitude * tp.amplitudeADSREnvelope.tick()
+	left *= a
+	right *= a
+
+	// balance the signal
+	left *= tp.balanceMultiplierLeft
+	right *= tp.balanceMultiplierRight
 
 	// update phase
 	tp.phase += tp.phaseIncrement
@@ -364,6 +361,7 @@ func (tp *TablePlayer) SetLoopSlice(loopStart, loopEnd float64) {
 // reset playback position
 // begin playback at "start" position if forwards playback
 // begin playback at "end" position if reverse playback
+// This doesn't restart the amplitude ADSR envelope, just the playback position
 //
 // NB. if you call SetReverse(true) immediately after creation of the
 // TablePlayer, the starting phase of the table will be at 0, subsequently
@@ -382,13 +380,24 @@ func (tp *TablePlayer) Trigger() {
 		// begin playback at "start" position
 		tp.phase = float64(tp.start)
 	}
+	tp.isFinished = false
 }
 
-// turn the gate on/off (which sets the envelopes into attack or release
-// stages indirectly)
-func (tp *TablePlayer) SetGate(gateOn bool) {
+// (re)sets the envelope to its attack stage, regardless of where it's at
+func (tp *TablePlayer) Attack() {
+	tp.amplitudeADSREnvelope.attack()
 }
 
+// (re)sets the envelope to its release stage, regardless of where it's at
+// NB, this will (possibly) remove the tableplayer from the active players if
+// it fully releases, as the amplitude adsr has a doneAction callback
+// which removes the a playback event from the active events in the engine
+// (assuming it fully releases, that is enters an off stage)
+func (tp *TablePlayer) Release() {
+	tp.amplitudeADSREnvelope.release()
+}
+
+// set the DC offset (obviously)
 func (tp *TablePlayer) SetDCOffset(dc float64) {
 	tp.dcOffset = dc
 }
@@ -456,6 +465,11 @@ func (tp *TablePlayer) SetSpeed(speed float64, slideTime ...float64) {
 
 }
 
+// like SetSpeed, but integer note values which represent chromatic pitch offset
+func (tp *TablePlayer) SetNote(n int, slideTime ...float64) {
+	tp.SetSpeed(math.pow(2, float64(n)/12.0), slideTime)
+}
+
 // turn on reverse playback(if it's not already on)
 // NB. if you just want a one-shot reverse playback of a table, call
 // SetReverse(true); Trigger() (in that order).  You must call Trigger() to
@@ -516,17 +530,15 @@ func (tp *TablePlayer) SetFilterResonance(resonance float64) {
 // (amplitude) ADSR setters
 // can't use struct embedding here, as I might have multiple envelopes in the
 // future... who knows
-func (tp *TablePlayer) SetADSREnvelopeOn(on bool) {
-}
-func (tp *TablePlayer) SetAttack(attackTimeInSeconds float64) {
+func (tp *TablePlayer) SetAmplitudeAttack(attackTimeInSeconds float64) {
 	tp.amplitudeADSREnvelope.setAttack(attackTimeInSeconds)
 }
-func (tp *TablePlayer) SetDecay(decayTimeInSeconds float64) {
+func (tp *TablePlayer) SetAmplitudeDecay(decayTimeInSeconds float64) {
 	tp.amplitudeADSREnvelope.setDecay(decayTimeInSeconds)
 }
-func (tp *TablePlayer) SetSustain(sustainLevel float64) {
+func (tp *TablePlayer) SetAmplitudeSustain(sustainLevel float64) {
 	tp.amplitudeADSREnvelope.setSustain(sustainLevel)
 }
-func (tp *TablePlayer) SetRelease(releaseTimeInSeconds float64) {
+func (tp *TablePlayer) SetAmplitudeRelease(releaseTimeInSeconds float64) {
 	tp.amplitudeADSREnvelope.setRelease(releaseTimeInSeconds)
 }
