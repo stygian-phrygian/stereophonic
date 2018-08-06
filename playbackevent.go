@@ -1,5 +1,10 @@
 package stereophonic
 
+import (
+	"fmt"
+	"math"
+)
+
 const (
 	playbackLimitedDuration int = iota
 	playbackUnlimitedDuration
@@ -127,7 +132,8 @@ func (e *Engine) Prepare(slot int, delayInSeconds, durationInSeconds float64) (*
 }
 
 // compute another tick of the event
-func (p *playbackEvent) tick() (left, right float64) {
+func (p *playbackEvent) tick() (float64, float64) {
+	var left, right float64
 
 retry:
 	switch p.currentState {
@@ -137,8 +143,9 @@ retry:
 		// if there are frames to tick
 		if p.durationInFrames > 0 {
 			// tick them (and decrement remaining ticks)
+			fmt.Printf("%d\n", p.durationInFrames) //DEBUG
 			p.durationInFrames--
-			return p.tick()
+			left, right = p.tick()
 		} else {
 			// else there are no more frames to tick
 			// enter release stage of the amplitude adsr
@@ -156,14 +163,14 @@ retry:
 		// NB. the only way to exit this state is to call the
 		// TablePlayer Release() (which will be called automatically
 		// for limited duration events (see switch case above))
-		return p.tick()
+		left, right = p.tick()
 
 	case playbackDelay:
 		// if there are (delay) frames to tick
 		if p.delayInFrames > 0 {
 			// decrement remaining ticks
 			p.delayInFrames--
-			return 0.0, 0.0
+			left, right = 0.0, 0.0
 		} else {
 			// else there are no more (delay) frames to tick
 			// change the playback state to unlimited/limited duration
@@ -176,6 +183,8 @@ retry:
 			goto retry
 		}
 	}
+
+	return left, right
 }
 
 //// redefine tick() to handle delayInFrames/durationInFrames

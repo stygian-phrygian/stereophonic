@@ -216,7 +216,7 @@ func (adsr *adsrEnvelope) tick() float64 {
 				// update the multiplier (for off stage)
 				adsr.currentLevel = adsrMinimumLevel
 				// run the done action (if exists, only once)
-				if (adsr.doneAction != nil) && (!ranDoneAction) {
+				if (adsr.doneAction != nil) && (!adsr.ranDoneAction) {
 					adsr.doneAction()
 					adsr.ranDoneAction = true
 				}

@@ -3,7 +3,6 @@ package stereophonic
 import (
 	"fmt"
 	"github.com/gordonklaus/portaudio"
-	"math"
 	"sync"
 )
 

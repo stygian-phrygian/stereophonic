@@ -121,16 +121,15 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 
 	// create the table player
 	tp := &TablePlayer{
-		sampleRate:              sampleRate,
-		srFactor:                srFactor,
-		amplitude:               1.0,
-		dcOffset:                0.0,
-		balanceMultiplierLeft:   1.0,
-		balanceMultiplierRight:  1.0,
-		filterLeft:              filterLeft,
-		filterRight:             filterRight,
-		amplitudeADSREnvelope:   amplitudeADSREnvelope,
-		amplitudeADSREnvelopeOn: false,
+		sampleRate:             sampleRate,
+		srFactor:               srFactor,
+		amplitude:              1.0,
+		dcOffset:               0.0,
+		balanceMultiplierLeft:  1.0,
+		balanceMultiplierRight: 1.0,
+		filterLeft:             filterLeft,
+		filterRight:            filterRight,
+		amplitudeADSREnvelope:  amplitudeADSREnvelope,
 		table:                t,
 		phase:                0.0,
 		phaseIncrement:       srFactor, /* speed == 1.0 at *player's* sampleRate */
@@ -467,7 +466,7 @@ func (tp *TablePlayer) SetSpeed(speed float64, slideTime ...float64) {
 
 // like SetSpeed, but integer note values which represent chromatic pitch offset
 func (tp *TablePlayer) SetNote(n int, slideTime ...float64) {
-	tp.SetSpeed(math.pow(2, float64(n)/12.0), slideTime)
+	tp.SetSpeed(math.Pow(2, float64(n)/12.0), slideTime...)
 }
 
 // turn on reverse playback(if it's not already on)
