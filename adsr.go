@@ -7,11 +7,11 @@ import (
 
 // adsr envelope
 // attack, decay, sustain level, and release all have setters
-// to "note on" (or retrigger multiple times) call triggerAttack()
-// to "note off" (enter the release stage) call triggerRelease()
+// to "note on" (or retrigger multiple times) call attack()
+// to "note off" (enter the release stage) call release()
 // upon creation, the envelope is in the attack stage
 // a doneAction callback can also be specified, and which runs
-// when the adsr envelope finishes the release stage (when triggerRelease()
+// when the adsr envelope finishes the release stage (when release()
 // is called)
 
 // much of the algorithm below is inspired from the article found here:
@@ -47,6 +47,9 @@ type adsrEnvelope struct {
 	sampleRate float64
 	// the done action callback (called after the release stage finishes)
 	doneAction func()
+	// flag to determine if we've run the doneAction already (it should
+	// only be run a single time)
+	ranDoneAction bool
 }
 
 // setters
@@ -103,7 +106,7 @@ func (adsr *adsrEnvelope) setRelease(releaseTimeInSeconds float64) {
 
 // immediately enter the attack stage from the beginning
 // this is also for (re)triggering the adsr envelope
-func (adsr *adsrEnvelope) triggerAttack() {
+func (adsr *adsrEnvelope) attack() {
 	// update current stage, update the multiplier, and reset current tick
 	adsr.currentStage = adsrAttackStage
 	adsr.multiplier = calculateLevelMultiplier(
@@ -114,7 +117,7 @@ func (adsr *adsrEnvelope) triggerAttack() {
 }
 
 // immediately enter the release stage from the beginning
-func (adsr *adsrEnvelope) triggerRelease() {
+func (adsr *adsrEnvelope) release() {
 	// update current stage, update the multiplier, and reset current tick
 	adsr.currentStage = adsrReleaseStage
 	adsr.multiplier = calculateLevelMultiplier(
@@ -125,7 +128,7 @@ func (adsr *adsrEnvelope) triggerRelease() {
 }
 
 // a callback which runs when the release stage finishes
-// NB. the release stage is only entered by calling triggerRelease()
+// NB. the release stage is only entered by calling release()
 func (adsr *adsrEnvelope) setDoneAction(doneAction func()) {
 	adsr.doneAction = doneAction
 }
@@ -161,7 +164,7 @@ func newADSREnvelope(
 	// set the done action to nil (can be set later after creation)
 	adsr.doneAction = nil
 	// now, set the initial stage to attack
-	adsr.triggerAttack()
+	adsr.attack()
 
 	// return it
 	return adsr, nil
@@ -212,9 +215,10 @@ func (adsr *adsrEnvelope) tick() float64 {
 				adsr.currentStage = adsrOffStage
 				// update the multiplier (for off stage)
 				adsr.currentLevel = adsrMinimumLevel
-				// run the done action (if it exists)
-				if adsr.doneAction != nil {
+				// run the done action (if exists, only once)
+				if (adsr.doneAction != nil) && (!ranDoneAction) {
 					adsr.doneAction()
+					adsr.ranDoneAction = true
 				}
 				//
 
