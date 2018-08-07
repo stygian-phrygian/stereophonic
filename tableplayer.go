@@ -88,6 +88,14 @@ type TablePlayer struct {
 	// in a particular direction (forwards or reverse).  NB. this cannot be
 	// true if we're looping
 	isFinished bool
+	// "kontrol rate" (a csound inspired naming idiosyncracy).  These are
+	// used to limit expensive computation by limiting their occurence.
+	// The tradeoff is what is known as "zipper noise" but acceptable.
+	// Thus far, kRate is only used in the filter cutoff envelope (of which
+	// setting the cutoff induces costly division each call).  kRate could
+	// theoretically be runtime available as a setter (altering kMaxTicks).
+	kRate                   float64
+	kCurrentTick, kMaxTicks int
 }
 
 func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
@@ -142,6 +150,9 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 		return nil, err
 	}
 
+	// k-rate (default 100hz)
+	kRate := 100.0
+
 	// account for possible mismatch in the
 	// table's sample rate and the table-player's sample rate
 	srFactor := t.sampleRate / sampleRate
@@ -172,6 +183,9 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 		end:                    t.nFrames - 1,
 		loopStart:              0,
 		loopEnd:                t.nFrames - 1,
+		kRate:                  kRate,
+		kCurrentTick:           0,
+		kMaxTicks:              int(sampleRate/kRate + 1),
 	}
 	// correct possible sample rate mismatch between the table and the table player
 	tp.SetSpeed(1.0)
@@ -205,6 +219,9 @@ func (tp *TablePlayer) tick() (float64, float64) {
 		// tick the filter cutoff envelope too for symmetry (if it's on)
 		if tp.filterEnvelopeOn {
 			tp.filterADSREnvelope.tick()
+			// and update the kRate variables
+			tp.kCurrentTick++
+			tp.kCurrentTick %= tp.kMaxTicks
 		}
 		//
 		return left, right
@@ -232,12 +249,24 @@ func (tp *TablePlayer) tick() (float64, float64) {
 	// filter
 	//
 	// if the filter cutoff envelope is on
-	// set the filter cutoff with an envelope (this is expensive)
+	// update the filter cutoff with an adsr envelope
 	if tp.filterEnvelopeOn {
-		cutoff := tp.filterCutoff +
-			tp.filterADSREnvelope.tick()*tp.filterEnvelopeDepth
-		tp.filterLeft.setCutoff(cutoff)
-		tp.filterRight.setCutoff(cutoff)
+		// only update filter cutoff every tp.kMaxTicks (which is
+		// dependent on kRate).  This creates some zipper noise, but
+		// it's computationally cheaper (and hopefully acceptable).
+		if tp.kCurrentTick == 0 {
+			cutoff := tp.filterCutoff +
+				tp.filterADSREnvelope.tick()*tp.filterEnvelopeDepth
+			tp.filterLeft.setCutoff(cutoff)
+			tp.filterRight.setCutoff(cutoff)
+		} else {
+			// else progress time in the filter cutoff adsr
+			// envelope (with a tick but ignore result), skipping
+			// the expensive filter coefficient recalculation
+			tp.filterADSREnvelope.tick()
+		}
+		tp.kCurrentTick++
+		tp.kCurrentTick %= tp.kMaxTicks
 	}
 	left = tp.filterLeft.tick(left)
 	right = tp.filterRight.tick(right)
