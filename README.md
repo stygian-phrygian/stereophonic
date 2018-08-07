@@ -13,10 +13,9 @@ Check out `_examples/`
 ## TODO / Ideas
 
 
-    1. filter envelope in TablePlayer
-    2. master multi-tap delay fx send / tracks
-    3. resampling
-    4. sidechain compressor?
+    1. master multi-tap delay fx send / tracks
+    2. resampling
+    3. sidechain compressor?
 
 
     make events abstract, so not a playback event struct, just an interface
