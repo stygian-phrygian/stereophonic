@@ -378,37 +378,4 @@ func (e *Engine) streamCallback(out []float32) {
 			out[n+1] += float32(right)
 		}
 	}
-
-	//////////////////////////
-	// //  old way below
-	// //  this isn't sample accurate, and responds to events at a rate of
-	// //  FramesPerBuffer/SampleRate per second
-	// //  might be faster though, as it doesn't check for new playback
-	// //  events every frame, but only every FramesPerBuffer
-	// //
-	// //
-	// // clear the buffer before proceding (if we don't, the accumulation
-	// // of prior samples creates explosive dc-offset)
-	// for i, _ := range out {
-	// 	out[i] = 0.0
-	// }
-	// // get how many new playback events there are, then append them
-	// // to the active playback events set
-	// // when playback events reach a "done" state, they remove themselves
-	// // from activePlaybackEvents on the final call to their tick(), as was
-	// // specified in the doneAction callback in Prepare()
-	// for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
-	// 	e.activePlaybackEvents[<-e.newPlaybackEvents] = true
-	// }
-
-	// // compute each frame from each active playback event
-	// // remember our map of playbackEvents is being treated like a set
-	// // hence we're iterating the *keys* of the map
-	// for playbackEvent, _ := range e.activePlaybackEvents {
-	// 	for i := 0; i < len(out); i += 2 {
-	// 		left, right = playbackEvent.tick()
-	// 		out[i] += float32(left)
-	// 		out[i+1] += float32(right)
-	// 	}
-	// }
 }
