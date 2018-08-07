@@ -6,6 +6,15 @@ import (
 	"math"
 )
 
+const (
+	// A gain of -80 db is a 1/1000th reduction in amplitude, which is (for
+	// our musical purposes) enough to be considered amplitude == 0.  With
+	// this constant, we allow an enduser to specify that they want the
+	// gain to be basically negative infinity (and thereby avoid very small
+	// float64 calculations)
+	GainNegativeInfinity float64 = -80.0
+)
+
 // TablePlayer (obviously enough) keeps track of playback
 // within 1 table (which is a contiguous array of (interleaved) samples)
 //
@@ -479,15 +488,25 @@ func (tp *TablePlayer) SetDCOffset(dc float64) {
 }
 
 // specify the gain of the TablePlayer using decibels (0dBFS)
-// ex. tp.SetGain(6.0)  // => 6db increase in volume
-// ex. tp.SetGain(-3.0) // => 3db decrease in volume
-// ex. tp.SetGain(0.0)  // => 0db (no change in volume)
+// ex:
+//  tp.SetGain(6.0)                               // =>  6db increase in volume
+//  tp.SetGain(-3.0)                              // =>  3db decrease in volume
+//  tp.SetGain(0.0)                               // =>  0db (no change in volume)
+//  tp.SetGain(stereophonic.GainNegativeInfinity) // => -Inf db decrease in volume (amplitude == 0)
+//
 // awesome brief discussion here:
 //   https://sound.stackexchange.com/a/25533
 func (tp *TablePlayer) SetGain(db float64) {
-	// db        = 20*log10(amplitude/1.0)
-	// amplitude = 10^(db/20)
-	tp.amplitude = math.Pow(10, db*0.05)
+	if db <= GainNegativeInfinity {
+		// if we've gone past a certain (ridiculous) threshold of
+		// negative gain just set the amplitude to 0
+		tp.amplitude = 0.0
+	} else {
+		// 20*log10(amplitude/1.0) = db
+		//    log10(amplitude/1.0) = db/20
+		//          amplitude      = 10^(db/20)
+		tp.amplitude = math.Pow(10, db*0.05)
+	}
 }
 
 // adjust playback rate of the table
