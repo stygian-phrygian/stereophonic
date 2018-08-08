@@ -357,22 +357,24 @@ func (e *Engine) streamCallback(out []float32) {
 		left, right float64
 	)
 
-	// for each (stereo interleaved) frame
+	// check if there are new playback events recently encountered
+	// append them to the active playback events should they exist
+	// NB. only checks for new events at SampleRate/FramesPerBuffer hz
+	for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
+		e.activePlaybackEvents[<-e.newPlaybackEvents] = true
+	}
+
+	// for each (stereo interleaved) output frame
 	for n := 0; n < len(out); n += 2 {
 
-		// check if there are new playback events recently encountered
-		// append them to the active playback events should they exist
-		for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
-			e.activePlaybackEvents[<-e.newPlaybackEvents] = true
-		}
-
-		// clear the current frame (to avoid explosive accumulation)
+		// clear the current output frame (to avoid explosive accumulation)
 		out[n] = 0.0
 		out[n+1] = 0.0
 
-		// for each event in the active playback event
-		// accumulate a frame of audio at this frame in the output buffer
+		// for each event in the active playback events
 		for playbackEvent, _ := range e.activePlaybackEvents {
+			// accumulate a frame of audio from the event
+			// into the output buffer's current frame
 			left, right = playbackEvent.tick()
 			out[n] += float32(left)
 			out[n+1] += float32(right)
