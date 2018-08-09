@@ -59,7 +59,6 @@ func New() (*Engine, error) {
 	var (
 		err                     error
 		defaultOutputDeviceInfo *portaudio.DeviceInfo
-		defaultInputDeviceInfo  *portaudio.DeviceInfo
 		streamParameters        portaudio.StreamParameters
 	)
 
