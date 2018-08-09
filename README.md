@@ -16,6 +16,14 @@ Check out `_examples/`
     2. multiple track / effect bus
     3. master effects (eq filter & side chain compressor?)
 
+    // we should have different streamCallbacks for each possible scenario
+    output (no input)
+    output (mono input)
+    output (stereo input)
+    as you can't suddenly get input when the stream is started, you have to
+    stop the engine, adjust accordingly (SetDevice, SetInputChannels
+    this might be a microoptimization however.
+
 
     // delay send (with ping pong)
     e.SetDelayTimeLeft
