@@ -57,6 +57,7 @@ func New() (*Engine, error) {
 	var (
 		err                     error
 		defaultOutputDeviceInfo *portaudio.DeviceInfo
+		defaultInputDeviceInfo  *portaudio.DeviceInfo
 		streamParameters        portaudio.StreamParameters
 	)
 
@@ -64,15 +65,28 @@ func New() (*Engine, error) {
 	if err = portaudio.Initialize(); err != nil {
 		return nil, err
 	}
+
+	// get device info of the default input device
+	if defaultInputDeviceInfo, err = portaudio.DefaultInputDevice(); err != nil {
+		// if this errors for whatever reason, assume input is not
+		// available and set defaultInputDeviceInfo to nil (which
+		// portaudio will happily utilize in ascertaining streamParameters
+
+		//return nil, err // <--- deprecated, should remove this comment
+		defaultInputDeviceInfo = nil
+	}
+
 	// get device info of the default output device
 	if defaultOutputDeviceInfo, err = portaudio.DefaultOutputDevice(); err != nil {
 		return nil, err
 	}
-	// get stream parameters for the default output device
+
+	// get stream parameters for the default devices
 	// we're requesting low latency parameters (gotta go fast)
-	streamParameters = portaudio.LowLatencyParameters(nil, defaultOutputDeviceInfo)
-	// also stereo is preferred/required
-	// if it doesn't support stereo, well, you'll find out when Start() is called won't you
+	streamParameters = portaudio.LowLatencyParameters(defaultInputDeviceInfo, defaultOutputDeviceInfo)
+
+	// stereo output is required for anything to work.  If it doesn't
+	// support stereo... well you'll find out when Start() is called.
 	streamParameters.Output.Channels = 2
 
 	return &Engine{
@@ -86,9 +100,7 @@ func New() (*Engine, error) {
 	}, nil
 }
 
-// list audio devices this returns a listing of the portaudio device info
-// objects which you can explore at your leisure, maybe for use in SetDevice(),
-// who knows?
+// lists device info for all available devices
 func (e *Engine) ListDevices() ([]*portaudio.DeviceInfo, error) {
 	if !e.initialized {
 		return nil, errorEngineNotInitialized
@@ -96,12 +108,41 @@ func (e *Engine) ListDevices() ([]*portaudio.DeviceInfo, error) {
 	return portaudio.Devices()
 }
 
-// setters for sample rate, framesPerBuffer, and output device these methods
-// only work *before* you call Start() if you call them while the engine is
-// started, they won't have any effect, you must Stop() the engine.  if you
-// call them after Close(), they will return an error and you must Reopen()
-// Nota Bene:
-// these setters *wont* show you whether the values set are acceptable ;)
+// gets the default input device info
+// returns nil if the engine isn't initialized or portaudio errors getting the
+// device info (this allows more succinct usage in SetDevices())
+func (e *Engine) DefaultInputDevice() *portaudio.DeviceInfo {
+	if !e.initialized {
+		return nil
+	}
+	if defaultInputDeviceInfo, err := portaudio.DefaultInputDevice(); err != nil {
+		return nil
+	} else {
+		return defaultInputDeviceInfo
+	}
+}
+
+// gets the default output device info
+// returns nil if the engine isn't initialized or portaudio errors getting the
+// device info (this allows more succinct usage in SetDevices())
+func (e *Engine) DefaultOutputDevice() *portaudio.DeviceInfo {
+	if !e.initialized {
+		return nil
+	}
+	if defaultOutputDeviceInfo, err := portaudio.DefaultOutputDevice(); err != nil {
+		return nil
+	} else {
+		return defaultOutputDeviceInfo
+	}
+}
+
+// Nota Bene, regarding the sampleRate, framesPerBuffer, and Devices setters:
+// these setters *wont* show you whether the values set are acceptable.  They
+// only manifest *before* you call Start().  If you call them while the engine
+// is already started, they won't have any effect, you must Stop() the engine.
+// if you call them after Close(), they will return an error and you must Reopen()
+
+// sets the stream sample rate
 func (e *Engine) SetSampleRate(sr float64) error {
 	if !e.initialized {
 		return errorEngineNotInitialized
@@ -110,6 +151,9 @@ func (e *Engine) SetSampleRate(sr float64) error {
 	e.streamParameters.SampleRate = sr
 	return nil
 }
+
+// sets the number of frames per buffer (which determines how many *frames* of
+// audio each iteration of the stream callback has access to)
 func (e *Engine) SetFramesPerBuffer(framesPerBuffer int) error {
 	if !e.initialized {
 		return errorEngineNotInitialized
@@ -118,20 +162,34 @@ func (e *Engine) SetFramesPerBuffer(framesPerBuffer int) error {
 	e.streamParameters.FramesPerBuffer = framesPerBuffer
 	return nil
 }
-func (e *Engine) SetDevice(deviceInfo *portaudio.DeviceInfo) error {
+
+// sets the input and output audio devices.  If no audio input is desired, just
+// pass nil for inputDeviceInfo parameter.  Use ListDevices() to
+// (unsurprisingly) list all available devices info for the audio system.
+func (e *Engine) SetDevices(inputDeviceInfo, outputDeviceInfo *portaudio.DeviceInfo) error {
 	if !e.initialized {
 		return errorEngineNotInitialized
 	}
-	// create a new (low latency) stream parameter configuration (for the new device)
-	// hopefully you passed in an output device, otherwise Start() explodes later)
-	streamParameters := portaudio.LowLatencyParameters(nil, deviceInfo)
-	// copy the relevant old stream parameter values into the new stream parameter values
+	// create a new (low latency) stream parameter configuration.
+	// Hopefully you (at least) passed in an output device, otherwise
+	// Start() will blow up later)
+	streamParameters := portaudio.LowLatencyParameters(inputDeviceInfo, outputDeviceInfo)
+	// copy the relevant old stream parameter values into the new stream
+	// parameter values
 	streamParameters.SampleRate = e.streamParameters.SampleRate
 	streamParameters.FramesPerBuffer = e.streamParameters.FramesPerBuffer
-	// force stereo
-	// the output device *must* support stereo (otherwise this entire library will not work)
-	// if it doesn't support stereo, well, you'll find out when Start() is called won't you
+	// force stereo output.  NB, the output device *must* support stereo
+	// (otherwise this entire library will not work) if it doesn't support
+	// stereo, well, you'll find out when Start() is called won't you
 	streamParameters.Output.Channels = 2
+	// if we acquired an input device
+	if streamParameters.Input.Device != nil {
+		// force mono/stereo input (preferibly stereo)
+		if streamParameters.Input.Device.MaxInputChannels >= 2 {
+			streamParameters.Input.Channels = 2
+		}
+		// else there's only mono input, and it's set already (I think)
+	}
 	// update the stream parameters
 	e.streamParameters = streamParameters
 	return nil
@@ -351,7 +409,7 @@ func (e *Engine) Play(playbackEvents ...*playbackEvent) {
 
 // the callback which portaudio uses to fill the output buffer
 // the output buffer is assumed to be interleaved stereo format
-func (e *Engine) streamCallback(out []float32) {
+func (e *Engine) streamCallback(in, out []float32) {
 
 	var (
 		left, right float64
