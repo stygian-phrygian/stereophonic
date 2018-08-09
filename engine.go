@@ -7,12 +7,14 @@ import (
 )
 
 var (
-	errorEngineAlreadyInitialized error = fmt.Errorf("engine is already initialized")
-	errorEngineNotInitialized     error = fmt.Errorf("engine isn't initialized")
-	errorEngineAlreadyStarted     error = fmt.Errorf("engine is already started")
-	errorEngineNotStarted         error = fmt.Errorf("engine isn't started")
-	errorTableDoesNotExist        error = fmt.Errorf("table does not exist")
-	errorInvalidDuration          error = fmt.Errorf("invalid duration of time")
+	errorEngineAlreadyInitialized    error = fmt.Errorf("engine is already initialized")
+	errorEngineNotInitialized        error = fmt.Errorf("engine isn't initialized")
+	errorEngineAlreadyStarted        error = fmt.Errorf("engine is already started")
+	errorEngineNotStarted            error = fmt.Errorf("engine isn't started")
+	errorTableDoesNotExist           error = fmt.Errorf("table does not exist")
+	errorInvalidDuration             error = fmt.Errorf("invalid duration of time")
+	errorDeviceDoesNotExist          error = fmt.Errorf("device does not exist")
+	errorUnsupportedNumberOfChannels error = fmt.Errorf("unsupported number of channels")
 )
 
 // engine is a struct which maintains structural information
@@ -184,7 +186,7 @@ func (e *Engine) SetDevices(inputDeviceInfo, outputDeviceInfo *portaudio.DeviceI
 	streamParameters.Output.Channels = 2
 	// if we acquired an input device
 	if streamParameters.Input.Device != nil {
-		// force mono/stereo input (preferibly stereo)
+		// prefer stereo input (if it has >2 possible channels)
 		if streamParameters.Input.Device.MaxInputChannels >= 2 {
 			streamParameters.Input.Channels = 2
 		}
@@ -192,6 +194,31 @@ func (e *Engine) SetDevices(inputDeviceInfo, outputDeviceInfo *portaudio.DeviceI
 	}
 	// update the stream parameters
 	e.streamParameters = streamParameters
+	return nil
+}
+
+// sets how many input channels we want our input device to read in.  It should
+// be noted however, currently *only* mono or stereo input is supported in the
+// stream callback (hence you can only enter values of 1 or 2 to this function,
+// anything else will error).  Furthermore, if there is currently no input
+// device, this function will also error.
+func (e *Engine) SetInputChannels(numberOfChannels int) error {
+	if !e.initialized {
+		return errorEngineNotInitialized
+	}
+	// return error if the input device does not exist
+	if e.streamParameters.Input.Device == nil {
+		return errorDeviceDoesNotExist
+	}
+	// error if numberOfChannels is not mono or stereo
+	// or if we are assigning stereo to a mono only device
+	unsupportedNumberOfChannels := (numberOfChannels < 1) || (numberOfChannels > 2) ||
+		(numberOfChannels == 2 && e.streamParameters.Input.Device.MaxInputChannels == 1)
+	if unsupportedNumberOfChannels {
+		return errorUnsupportedNumberOfChannels
+	}
+	// successfully assign (a correct) number of channels
+	e.streamParameters.Input.Channels = numberOfChannels
 	return nil
 }
 
@@ -438,4 +465,7 @@ func (e *Engine) streamCallback(in, out []float32) {
 			out[n+1] += float32(right)
 		}
 	}
+	// fmt.Printf("%+v\n", e.streamParameters)
+	// fmt.Printf("len( in): %d, cap( in): %d\n", len(in), cap(in))
+	// fmt.Printf("len(out): %d, cap(out): %d\n", len(out), cap(out))
 }
