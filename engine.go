@@ -68,16 +68,6 @@ func New() (*Engine, error) {
 		return nil, err
 	}
 
-	// get device info of the default input device
-	if defaultInputDeviceInfo, err = portaudio.DefaultInputDevice(); err != nil {
-		// if this errors for whatever reason, assume input is not
-		// available and set defaultInputDeviceInfo to nil (which
-		// portaudio will happily utilize in ascertaining streamParameters
-
-		//return nil, err // <--- deprecated, should remove this comment
-		defaultInputDeviceInfo = nil
-	}
-
 	// get device info of the default output device
 	if defaultOutputDeviceInfo, err = portaudio.DefaultOutputDevice(); err != nil {
 		return nil, err
@@ -85,7 +75,7 @@ func New() (*Engine, error) {
 
 	// get stream parameters for the default devices
 	// we're requesting low latency parameters (gotta go fast)
-	streamParameters = portaudio.LowLatencyParameters(defaultInputDeviceInfo, defaultOutputDeviceInfo)
+	streamParameters = portaudio.LowLatencyParameters(nil, defaultOutputDeviceInfo)
 
 	// stereo output is required for anything to work.  If it doesn't
 	// support stereo... well you'll find out when Start() is called.
@@ -111,8 +101,13 @@ func (e *Engine) ListDevices() ([]*portaudio.DeviceInfo, error) {
 }
 
 // gets the default input device info
-// returns nil if the engine isn't initialized or portaudio errors getting the
-// device info (this allows more succinct usage in SetDevices())
+// returns nil if portaudio errors finding the default device or if the engine
+// isn't initialized (this allows more succinct usage in SetDevices())
+// NB. currently input (on my linus system) has a nasty bug with portaudio.
+// The stream just crashes printing some alsa garbage if it doesn't like your
+// USB microphone or whatever.  It's also non-deterministic (my absolute
+// favorite flavor). As such, if you're using input in the engine... well.
+// That's your risk.  I'm not patching the nightmare factory that is ALSA.
 func (e *Engine) DefaultInputDevice() *portaudio.DeviceInfo {
 	if !e.initialized {
 		return nil
@@ -125,8 +120,8 @@ func (e *Engine) DefaultInputDevice() *portaudio.DeviceInfo {
 }
 
 // gets the default output device info
-// returns nil if the engine isn't initialized or portaudio errors getting the
-// device info (this allows more succinct usage in SetDevices())
+// returns nil if portaudio errors finding the default device or if the engine
+// isn't initialized (this allows more succinct usage in SetDevices())
 func (e *Engine) DefaultOutputDevice() *portaudio.DeviceInfo {
 	if !e.initialized {
 		return nil
@@ -238,8 +233,7 @@ func (e *Engine) Start() error {
 		return errorEngineAlreadyStarted
 	}
 
-	// open an (output only) stream
-	// with prior specified stream parameters & our callback
+	// open a stream with prior specified stream parameters & our callback
 	stream, err := portaudio.OpenStream(e.streamParameters, e.streamCallback)
 	if err != nil {
 		return err
@@ -442,15 +436,14 @@ func (e *Engine) streamCallback(in, out []float32) {
 		left, right float64
 	)
 
-	// check if there are new playback events recently encountered
-	// append them to the active playback events should they exist
-	// NB. only checks for new events at SampleRate/FramesPerBuffer hz
-	for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
-		e.activePlaybackEvents[<-e.newPlaybackEvents] = true
-	}
-
 	// for each (stereo interleaved) output frame
 	for n := 0; n < len(out); n += 2 {
+
+		// check if there are new playback events recently encountered
+		// append them to the active playback events should they exist
+		for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
+			e.activePlaybackEvents[<-e.newPlaybackEvents] = true
+		}
 
 		// clear the current output frame (to avoid explosive accumulation)
 		out[n] = 0.0
@@ -464,8 +457,25 @@ func (e *Engine) streamCallback(in, out []float32) {
 			out[n] += float32(left)
 			out[n+1] += float32(right)
 		}
+
 	}
-	// fmt.Printf("%+v\n", e.streamParameters)
-	// fmt.Printf("len( in): %d, cap( in): %d\n", len(in), cap(in))
-	// fmt.Printf("len(out): %d, cap(out): %d\n", len(out), cap(out))
+
+	// // monitor audio input
+	// if e.streamParameters.Input.Device != nil {
+	// 	switch e.streamParameters.Input.Channels {
+	// 	case 1:
+	// 		// mono
+	// 		for n := 0; n < len(in); n++ {
+	// 			out[2*n] += in[n]
+	// 			out[2*n+1] += in[n]
+	// 		}
+	// 	case 2:
+	// 		// stereo
+	// 		for n := 0; n < len(in); n += 2 {
+	// 			out[n] += in[n]
+	// 			out[n+1] += in[n+1]
+	// 		}
+	// 	}
+	// }
+
 }
