@@ -11,16 +11,14 @@ import (
 
 func main() {
 
-	// create an engine (this tries to open both the default input and
-	// output devices automatically)
+	// create an engine
 	e, err := stereophonic.New()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer e.Close()
 
-	// we can specify that we only want output like so (saves some CPU)
-	e.SetDevices(nil, e.DefaultOutputDevice())
+	// engine configuration goes here (before start)
 
 	// start engine
 	if err := e.Start(); err != nil {
