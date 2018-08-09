@@ -12,11 +12,51 @@ Check out `_examples/`
 
 ## TODO / Ideas
 
+    1. recording audio / resampling
+    2. multiple track / effect bus
+    3. master effects (eq filter & side chain compressor?)
 
-    1. master multi-tap delay fx send / tracks
-    2. resampling
-    3. sidechain compressor?
 
+    // delay send (with ping pong)
+    e.SetDelayTimeLeft
+
+    // reverb send would be nice...
+
+    // master compressor (with sidechain)
+    //
+    // turn the compressor on/off
+    e.SetCompressorOn()
+    // turn sidechain on/off (if on, event sidechain sends duck master)
+    e.SetCompressorSideChainOn() 
+    // standard compressor commands 
+    e.SetCompressorAttack()
+    e.SetCompressorRelease()
+    e.SetCompressorThreshold()
+    e.SetCompressorRatio()
+
+    //master filter
+    //
+    e.SetFilterMode()
+    e.SetFilterCutoff()
+    e.SetFilterResonance()
+
+    // master gain
+    e.SetGain()
+
+
+    
+sendSideChainAmplitude
+sendDelayAmplitude
+
+
+    PROBLEM: updating the engine's sample rate MUST also update the FX chain
+    (as this would alter the way a delay works.  Effect Send.  Effects Bus (bus
+    is the correct term, not buss)
+
+
+    what about: engine.Prepare() automatically sends everything to channel 0
+    (first track) which is (also automatically) wired to be the ducking track
+    for the master compressor to read from?
 
     make events abstract, so not a playback event struct, just an interface
     which has like a tick()/pull() method or something, then we can have playback
@@ -25,31 +65,7 @@ Check out `_examples/`
     pulls in another frame maybe (or a buffer of frames to be quicker and work
     with the system more)
 
-    rewrite playbackEvent.go (too complicated)?
-
     this should be viewed as a synthesizer really, where each event/voice
     is just a voice of our overarching synth.  Hence there will only be 1 FX
     bus (as it's just a single synth *wink wink nudge nudge*) that can be sort
     "pretended" into a multitracker
-
-    make N tracks (in the beginning) could be an array, or even a hashmap
-    afterwards, each playback event/voice has a track it writes its tick()
-    to... maybe tick() returns 4 values, the wet and dry stereo signals?
-
-    no master fx send per playback event, instead, there will be a master fx
-    channel but each playback event specifies 
-mixer:
-    each engine HAS A mixer inside of it, from which playback events
-    are sent to various TRACKS
-    a mixer is a collection of tracks, and sends
-    each track only handles 1 voice at a time.  To simulate polyphony
-    you can control multiple tracks with one method simultaneously.
-    track methods/setters: gain, pan, filter, fx-send-dry/wet
-    the sends take some audio frame input and output there own (processed)
-    effects, probably I'll only implement delay (as other things are
-    too costly to compute (glares at you, reverb), and I want this to be minimal)
-    
-    maybe playbackEvent should be called track event (with an added)
-    track specified to engine.Prepare, which creates a playbackEvent whose
-    tick() method accumulates to a track? and the streamCallback just
-    calls tick for every active event, then sums the tracks
