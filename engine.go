@@ -432,23 +432,18 @@ func (e *Engine) Play(playbackEvents ...*playbackEvent) {
 // the output buffer is assumed to be interleaved stereo format
 func (e *Engine) streamCallback(in, out []float32) {
 
-	var (
-		left, right float64
-	)
+	var left, right float64
 
 	// for each (stereo interleaved) output frame
 	for n := 0; n < len(out); n += 2 {
-
 		// check if there are new playback events recently encountered
 		// append them to the active playback events should they exist
 		for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
 			e.activePlaybackEvents[<-e.newPlaybackEvents] = true
 		}
-
 		// clear the current output frame (to avoid explosive accumulation)
 		out[n] = 0.0
 		out[n+1] = 0.0
-
 		// for each event in the active playback events
 		for playbackEvent, _ := range e.activePlaybackEvents {
 			// accumulate a frame of audio from the event
@@ -457,25 +452,24 @@ func (e *Engine) streamCallback(in, out []float32) {
 			out[n] += float32(left)
 			out[n+1] += float32(right)
 		}
-
 	}
 
-	// // monitor audio input
-	// if e.streamParameters.Input.Device != nil {
-	// 	switch e.streamParameters.Input.Channels {
-	// 	case 1:
-	// 		// mono
-	// 		for n := 0; n < len(in); n++ {
-	// 			out[2*n] += in[n]
-	// 			out[2*n+1] += in[n]
-	// 		}
-	// 	case 2:
-	// 		// stereo
-	// 		for n := 0; n < len(in); n += 2 {
-	// 			out[n] += in[n]
-	// 			out[n+1] += in[n+1]
-	// 		}
-	// 	}
-	// }
+	// monitor audio input
+	if e.streamParameters.Input.Device != nil {
+		switch e.streamParameters.Input.Channels {
+		case 1:
+			// mono
+			for n := 0; n < len(in); n++ {
+				out[2*n] += in[n]
+				out[2*n+1] += in[n]
+			}
+		case 2:
+			// stereo
+			for n := 0; n < len(in); n += 2 {
+				out[n] += in[n]
+				out[n+1] += in[n+1]
+			}
+		}
+	}
 
 }
