@@ -45,7 +45,7 @@ type Engine struct {
 	// flag to check whether the portaudio stream started
 	started bool
 	// gain for audio input (assuming there *is* an audio input device)
-	inputAmplitude float64
+	inputAmplitude float32
 }
 
 // prepare an engine
@@ -88,7 +88,7 @@ func New() (*Engine, error) {
 		newPlaybackEvents:    make(chan *playbackEvent, 128), // <--- magic number
 		initialized:          true,
 		started:              false,
-		inputAmplitude:       1.0, // 0db gain for input audio
+		inputAmplitude:       float32(1.0), // 0db gain for audio input
 	}, nil
 }
 
@@ -220,7 +220,7 @@ func (e *Engine) SetInputChannels(numberOfChannels int) error {
 // set the gain (in decibels) to be applied to audio input (should an audio
 // input device exist *already*, otherwise this does nothing)
 func (e *Engine) SetInputGain(db float64) {
-	e.inputAmplitude = decibelsToAmplitude(db)
+	e.inputAmplitude = float32(decibelsToAmplitude(db))
 }
 
 // open *and* start an audio stream with existing stream parameters
