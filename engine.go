@@ -20,8 +20,6 @@ var (
 // engine is a struct which maintains structural information
 // related to playback and device parameters
 type Engine struct {
-	// lock (only for configuring the engine pre-playback and load/delete
-	// sample slots from the system)
 	sync.Mutex
 	// stream parameters keeps track of relevant playback variables for a
 	// stream, namely SampleRate, FramesPerBuffer, and the output device.
@@ -46,6 +44,8 @@ type Engine struct {
 	initialized bool
 	// flag to check whether the portaudio stream started
 	started bool
+	// gain for audio input (assuming there *is* an audio input device)
+	inputAmplitude float64
 }
 
 // prepare an engine
@@ -88,6 +88,7 @@ func New() (*Engine, error) {
 		newPlaybackEvents:    make(chan *playbackEvent, 128), // <--- magic number
 		initialized:          true,
 		started:              false,
+		inputAmplitude:       1.0, // 0db gain for input audio
 	}, nil
 }
 
@@ -216,9 +217,14 @@ func (e *Engine) SetInputChannels(numberOfChannels int) error {
 	return nil
 }
 
+// set the gain (in decibels) to be applied to audio input (should an audio
+// input device exist *already*, otherwise this does nothing)
+func (e *Engine) SetInputGain(db float64) {
+	e.inputAmplitude = decibelsToAmplitude(db)
+}
+
 // open *and* start an audio stream with existing stream parameters
 func (e *Engine) Start() error {
-	// update atomically
 	e.Lock()
 	defer e.Unlock()
 
@@ -255,7 +261,6 @@ func (e *Engine) Start() error {
 
 // stop *and* close an audio stream
 func (e *Engine) Stop() error {
-	// update atomically
 	e.Lock()
 	defer e.Unlock()
 
@@ -286,13 +291,10 @@ func (e *Engine) Stop() error {
 // terminates the underlying portaudio instance.  if you wish to resuse the
 // Engine after Close(), call Reopen()
 func (e *Engine) Close() error {
-	var (
-		err error
-	)
-
-	// update atomically
 	e.Lock()
 	defer e.Unlock()
+
+	var err error
 
 	// first, check if the stream exists
 	// edge case call sequence of: New() -> [stream: nil], Close()
@@ -336,7 +338,6 @@ func (e *Engine) Close() error {
 // used to (re)initialize the engine (should you have called Close() prior)
 // This provides the option not needing to reload all the tables
 func (e *Engine) Reopen() error {
-	// update atomically
 	e.Lock()
 	defer e.Unlock()
 
@@ -433,13 +434,20 @@ func (e *Engine) streamCallback(in, out []float32) {
 
 	var left, right float64
 
+	// if there are new playback events recently encountered append
+	// them to the active playback events set
+	//
+	// NB. for some reason, we can only access activePlaybackEvents at a
+	// rate of SampleRate / FramesPerBuffer hz (and more confusinhgly
+	// FramesPerBuffer can vary with each call).  This effectively creates
+	// unlistenably amounts of stutter if the FramesPerBuffer is too high
+	// (greater than 512 for 44100hz sample rate is already pushing it)
+	for i := 0; i < len(e.newPlaybackEvents); i++ {
+		e.activePlaybackEvents[<-e.newPlaybackEvents] = true
+	}
+
 	// for each (stereo interleaved) output frame
 	for n := 0; n < len(out); n += 2 {
-		// check if there are new playback events recently encountered
-		// append them to the active playback events should they exist
-		for i, count := 0, len(e.newPlaybackEvents); i < count; i++ {
-			e.activePlaybackEvents[<-e.newPlaybackEvents] = true
-		}
 		// clear the current output frame (to avoid explosive accumulation)
 		out[n] = 0.0
 		out[n+1] = 0.0
@@ -459,14 +467,14 @@ func (e *Engine) streamCallback(in, out []float32) {
 		case 1:
 			// mono
 			for n := 0; n < len(in); n++ {
-				out[2*n] += in[n]
-				out[2*n+1] += in[n]
+				out[2*n] += in[n] * e.inputAmplitude
+				out[2*n+1] += in[n] * e.inputAmplitude
 			}
 		case 2:
 			// stereo
 			for n := 0; n < len(in); n += 2 {
-				out[n] += in[n]
-				out[n+1] += in[n+1]
+				out[n] += in[n] * e.inputAmplitude
+				out[n+1] += in[n+1] * e.inputAmplitude
 			}
 		}
 	}
