@@ -31,7 +31,7 @@ type Engine struct {
 	streamSampleRate float64
 	// mapping from a slot number -> sample (or as we call tables)
 	// this collates references to the loaded tables
-	tables map[int]*Table
+	tables map[int]*table
 	// set (really a map, cuz golang has no set datatype) of (currently)
 	// active sources of audio.  the stream callback is constantly
 	// iterating the active playbackEvents calling tick() on each
@@ -83,7 +83,7 @@ func New() (*Engine, error) {
 	return &Engine{
 		streamParameters:     streamParameters, // <--- default configuration
 		stream:               nil,
-		tables:               map[int]*Table{},
+		tables:               map[int]*table{},
 		activePlaybackEvents: map[*playbackEvent]bool{},
 		newPlaybackEvents:    make(chan *playbackEvent, 128), // <--- magic number
 		initialized:          true,
@@ -364,7 +364,7 @@ func (e *Engine) Load(slot int, soundFileName string) error {
 	e.Lock()
 	defer e.Unlock()
 
-	table, err := NewTable(soundFileName)
+	table, err := newTable(soundFileName)
 	if err != nil {
 		return err
 	}

@@ -16,9 +16,9 @@ import (
 // It's used to hold single-cycle waveforms or whole files.
 // NB. this struct holds an *entire* sound file's audio data in memory.
 // Perhaps it's not efficient, but memory is cheap boy!
-// Tables are essentially immutable after creation.
+// tables are essentially immutable after creation.
 
-type Table struct {
+type table struct {
 	name       string
 	channels   int
 	sampleRate float64   // <--- float64 for convenience
@@ -29,26 +29,26 @@ type Table struct {
 
 // force immutability by disallowing setters
 
-func (b *Table) Name() string {
+func (b *table) Name() string {
 	return b.name
 }
 
-func (b *Table) Channels() int {
+func (b *table) Channels() int {
 	return b.channels
 }
 
-func (b *Table) SampleRate() float64 {
+func (b *table) SampleRate() float64 {
 	return b.sampleRate
 }
 
-func (b *Table) NFrames() int {
+func (b *table) NFrames() int {
 	return b.nFrames
 }
 
 // create a new table from a sound file
-// (most common use case for Table)
-func NewTable(soundFileName string) (*Table, error) {
-	b := &Table{}
+// (most common use case for table)
+func newTable(soundFileName string) (*table, error) {
+	b := &table{}
 	err := b.loadFile(soundFileName)
 	if err != nil {
 		return nil, err
@@ -57,8 +57,8 @@ func NewTable(soundFileName string) (*Table, error) {
 }
 
 // create a new table and fill it with a single cycle waveform
-func NewTableSine(frequency, phase, sampleRate float64) (*Table, error) {
-	b := &Table{}
+func newTableSine(frequency, phase, sampleRate float64) (*table, error) {
+	b := &table{}
 	err := b.loadSine(frequency, phase, sampleRate)
 	if err != nil {
 		return nil, err
@@ -67,8 +67,8 @@ func NewTableSine(frequency, phase, sampleRate float64) (*Table, error) {
 }
 
 // create a new table and fill it with a single cycle waveform
-func NewTableSaw(frequency, phase, sampleRate float64) (*Table, error) {
-	b := &Table{}
+func newTableSaw(frequency, phase, sampleRate float64) (*table, error) {
+	b := &table{}
 	err := b.loadSaw(frequency, phase, sampleRate)
 	if err != nil {
 		return nil, err
@@ -77,8 +77,8 @@ func NewTableSaw(frequency, phase, sampleRate float64) (*Table, error) {
 }
 
 // create a new table and fill it with a single cycle waveform
-func NewTableSquare(frequency, phase, sampleRate float64) (*Table, error) {
-	b := &Table{}
+func newTableSquare(frequency, phase, sampleRate float64) (*table, error) {
+	b := &table{}
 	err := b.loadSquare(frequency, phase, sampleRate)
 	if err != nil {
 		return nil, err
@@ -87,8 +87,8 @@ func NewTableSquare(frequency, phase, sampleRate float64) (*Table, error) {
 }
 
 // create a new table and fill it with noise of a certain duration in seconds
-func NewTableWhiteNoise(duration, sampleRate float64) (*Table, error) {
-	b := &Table{}
+func newTableWhiteNoise(duration, sampleRate float64) (*table, error) {
+	b := &table{}
 	err := b.loadWhiteNoise(duration, sampleRate)
 	if err != nil {
 		return nil, err
@@ -97,8 +97,8 @@ func NewTableWhiteNoise(duration, sampleRate float64) (*Table, error) {
 }
 
 // create a new table and fill it with an impulse train
-func NewTableImpulseTrain(frequency, phase, sampleRate float64) (*Table, error) {
-	b := &Table{}
+func newTableImpulseTrain(frequency, phase, sampleRate float64) (*table, error) {
+	b := &table{}
 	err := b.loadImpulseTrain(frequency, phase, sampleRate)
 	if err != nil {
 		return nil, err
@@ -106,8 +106,8 @@ func NewTableImpulseTrain(frequency, phase, sampleRate float64) (*Table, error) 
 	return b, nil
 }
 
-// fill a Table with a sound file's samples
-func (b *Table) loadFile(soundFileName string) error {
+// fill a table with a sound file's samples
+func (b *table) loadFile(soundFileName string) error {
 
 	var info sndfile.Info
 
@@ -177,11 +177,11 @@ func createSingleCycle(frequency, sampleRate float64) []float64 {
 	return make([]float64, n)
 }
 
-// generates a single cycle sine waveform inside the Table
+// generates a single cycle sine waveform inside the table
 // The frequency should be >= 0 and <= the nyquist frequency (sampleRate/2)
 // else aliasing will occur.  The phase should be in the range [0, 1) and
 // anything outside of that will be wrapped around.
-func (b *Table) loadSine(frequency, phase, sampleRate float64) error {
+func (b *table) loadSine(frequency, phase, sampleRate float64) error {
 
 	// check that the sample rate is valid
 	if sampleRate < 1 {
@@ -220,11 +220,11 @@ func (b *Table) loadSine(frequency, phase, sampleRate float64) error {
 	return nil
 }
 
-// generates a single cycle sawtooth waveform inside the Table
+// generates a single cycle sawtooth waveform inside the table
 // The frequency should be >= 0 and <= the nyquist frequency (sampleRate/2)
 // else aliasing will occur.  The phase should be in the range [0, 1) and
 // anything outside of that will be wrapped around.
-func (b *Table) loadSaw(frequency, phase, sampleRate float64) error {
+func (b *table) loadSaw(frequency, phase, sampleRate float64) error {
 
 	// check that the sample rate is valid
 	if sampleRate < 1 {
@@ -262,11 +262,11 @@ func (b *Table) loadSaw(frequency, phase, sampleRate float64) error {
 	return nil
 }
 
-// generates a single cycle square waveform inside the Table
+// generates a single cycle square waveform inside the table
 // The frequency should be >= 0 and <= the nyquist frequency (sampleRate/2)
 // else aliasing will occur.  The phase should be in the range [0, 1) and
 // anything outside of that will be wrapped around.
-func (b *Table) loadSquare(frequency, phase, sampleRate float64) error {
+func (b *table) loadSquare(frequency, phase, sampleRate float64) error {
 
 	// check that the sample rate is valid
 	if sampleRate < 1 {
@@ -319,7 +319,7 @@ var (
 )
 
 // generates white noise inside the buffer
-func (b *Table) loadWhiteNoise(duration, sampleRate float64) error {
+func (b *table) loadWhiteNoise(duration, sampleRate float64) error {
 
 	// check that the sample rate is valid
 	if sampleRate < 1 {
@@ -345,11 +345,11 @@ func (b *Table) loadWhiteNoise(duration, sampleRate float64) error {
 	return nil
 }
 
-// generates a single cycle impulse train waveform inside the Table
+// generates a single cycle impulse train waveform inside the table
 // The frequency should be >= 0 and <= the nyquist frequency (sampleRate/2)
 // else aliasing will occur.  The phase should be in the range [0, 1) and
 // anything outside of that will be wrapped around.
-func (b *Table) loadImpulseTrain(frequency, phase, sampleRate float64) error {
+func (b *table) loadImpulseTrain(frequency, phase, sampleRate float64) error {
 
 	// check that the sample rate is valid
 	if sampleRate < 1 {

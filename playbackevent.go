@@ -11,7 +11,7 @@ const (
 )
 
 // a playback event represents a limited/unlimited duration of time to pull
-// frames of audio from a tick source (TablePlayer) a playback event can only
+// frames of audio from a tick source (tablePlayer) a playback event can only
 // be used *once*, you *cannot* send it to Play() multiple times (it's only
 // added once to the engine's active playback events set).
 //
@@ -22,19 +22,19 @@ const (
 
 type playbackEvent struct {
 	// delayInFrames is the number of frames to delay before we begin
-	// ticking from our *TablePlayer durationInFrames is how many times we
-	// tick() on the *TablePlayer therefore, total frames = delayInFrames +
+	// ticking from our *tablePlayer durationInFrames is how many times we
+	// tick() on the *tablePlayer therefore, total frames = delayInFrames +
 	// durationInFrames
 	//
 	// if durationInFrames <= 0, then the event is of *unlimited* duration
 	// and Release() must be called to end it.  Release() will defer to the
-	// underlying TablePlayer's adsr (calling its Release()) and awaiting
+	// underlying tablePlayer's adsr (calling its Release()) and awaiting
 	// until its release stage is completely finished before running the
 	// doneAction
 	delayInFrames, durationInFrames int
-	// the *TablePlayer is what generates frames of audio for us...  this
+	// the *tablePlayer is what generates frames of audio for us...  this
 	// could be abstracted perhaps into an interface with a tick()
-	*TablePlayer
+	*tablePlayer
 	// which state playback is in (on (limited duration), on (unlimited
 	// duration), or delayed).  NB. there's no Off stage, as the the adsr
 	// envelope should remove the event via the done action
@@ -87,7 +87,7 @@ func (e *Engine) Prepare(slot int, delayInSeconds, durationInSeconds float64) (*
 	}
 
 	// (try to) create a new tableplayer (with the recently acquired table)
-	tablePlayer, err := NewTablePlayer(table, e.streamSampleRate)
+	tablePlayer, err := newTablePlayer(table, e.streamSampleRate)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (e *Engine) Prepare(slot int, delayInSeconds, durationInSeconds float64) (*
 	p := &playbackEvent{
 		delayInFrames:     delayInFrames,
 		durationInFrames:  durationInFrames,
-		TablePlayer:       tablePlayer,
+		tablePlayer:       tablePlayer,
 		currentState:      playbackLimitedDuration,
 		isLimitedDuration: durationInSeconds > 0.0, // <--- edge case
 	}
@@ -143,7 +143,7 @@ retry:
 		if p.durationInFrames > 0 {
 			// tick them (and decrement remaining ticks)
 			p.durationInFrames--
-			left, right = p.TablePlayer.tick()
+			left, right = p.tablePlayer.tick()
 		} else {
 			// change playback to unlimited duration (to allow the
 			// release envelope to complete and call its doneAction
@@ -157,7 +157,7 @@ retry:
 
 	// on (unlimited duration)
 	case playbackUnlimitedDuration:
-		left, right = p.TablePlayer.tick()
+		left, right = p.tablePlayer.tick()
 
 	// on delayed playback
 	case playbackDelay:

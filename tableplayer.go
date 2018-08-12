@@ -6,19 +6,19 @@ import (
 	"math"
 )
 
-// TablePlayer (obviously enough) keeps track of playback
+// tablePlayer (obviously enough) keeps track of playback
 // within 1 table (which is a contiguous array of (interleaved) samples)
 //
 // This is basically a wave table synthesizer for 1 (stereo output) voice,
 // and represents 1 occurence of that voice (thereafter it's intended to be
 // garbage collected)
 //
-// Currently, TablePlayer only plays Tables of mono or stereo audio.
+// Currently, tablePlayer only plays tables of mono or stereo audio.
 // Mono (1 channel) audio will be automatically converted to stereo (2 channel)
 // output (which is the only output available in the engine)
 //
-// The Table (from which audio frames are drawn) *cannot* be changed
-// after construction of a TablePlayer, although a number of playback
+// The table (from which audio frames are drawn) *cannot* be changed
+// after construction of a tablePlayer, although a number of playback
 // variables are modifiable in real-time, as was mentioned above, this
 // struct represents *1* instance of playback for *1* table.
 //
@@ -27,7 +27,7 @@ import (
 // as well as loop-start/loop-end points, forwards and reverse playback
 //
 
-type TablePlayer struct {
+type tablePlayer struct {
 	// sample rate of the original sound file
 	sampleRate float64
 	// used to determine mismatch between playback sample rate and original sound file sample rate
@@ -55,8 +55,8 @@ type TablePlayer struct {
 	// filter cutoff envelope
 	// (look inside tick() to see how the above filter variables are used)
 	filterADSREnvelope *adsrEnvelope
-	// the frame data we read from (the Table)
-	table *Table
+	// the frame data we read from (the table)
+	table *table
 	// current frame index in the table
 	// which ranges from 0 to table.nFrames - 1
 	phase float64
@@ -98,7 +98,7 @@ type TablePlayer struct {
 	kCurrentTick, kMaxTicks int
 }
 
-func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
+func newTablePlayer(t *table, sampleRate float64) (*tablePlayer, error) {
 
 	// check table is non-nil
 	if t == nil {
@@ -158,7 +158,7 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 	srFactor := t.sampleRate / sampleRate
 
 	// create the table player
-	tp := &TablePlayer{
+	tp := &tablePlayer{
 		sampleRate:             sampleRate,
 		srFactor:               srFactor,
 		amplitude:              1.0,
@@ -198,7 +198,7 @@ func NewTablePlayer(t *Table, sampleRate float64) (*TablePlayer, error) {
 // this function always returns a stereo audio frame (left and right), to clarify:
 // for stereo channel tables, the returned frame is the processed left/right channels
 // for mono channel tables, the returned frame is the processed mono channel duplicated
-func (tp *TablePlayer) tick() (float64, float64) {
+func (tp *tablePlayer) tick() (float64, float64) {
 
 	var (
 		left  float64
@@ -369,7 +369,7 @@ func (tp *TablePlayer) tick() (float64, float64) {
 }
 
 // set looping mode, true => looping on, false => looping off
-func (tp *TablePlayer) SetLooping(loopingOn bool) {
+func (tp *tablePlayer) SetLooping(loopingOn bool) {
 	if loopingOn {
 		tp.isFinished = false
 	}
@@ -380,7 +380,7 @@ func (tp *TablePlayer) SetLooping(loopingOn bool) {
 // set start/end
 // where start/end are in the range [0, 1)
 // and start < end
-func (tp *TablePlayer) SetSlice(start, end float64) {
+func (tp *tablePlayer) SetSlice(start, end float64) {
 
 	// clamp start/end in range [0, 1)
 	start = math.Min(math.Max(0, start), 1.0)
@@ -408,7 +408,7 @@ func (tp *TablePlayer) SetSlice(start, end float64) {
 //
 // NB. this code allows one to create loop points that are larger than the
 // start/end points which is kind of weird... but I'll allow it.
-func (tp *TablePlayer) SetLoopSlice(loopStart, loopEnd float64) {
+func (tp *tablePlayer) SetLoopSlice(loopStart, loopEnd float64) {
 
 	// clamp start/end in range [0, 1)
 	loopStart = math.Min(math.Max(0, loopStart), 1.0)
@@ -438,12 +438,12 @@ func (tp *TablePlayer) SetLoopSlice(loopStart, loopEnd float64) {
 // This doesn't restart the amplitude ADSR envelope, just the playback position
 //
 // NB. if you call SetReverse(true) immediately after creation of the
-// TablePlayer, the starting phase of the table will be at 0, subsequently
+// tablePlayer, the starting phase of the table will be at 0, subsequently
 // *finishing* playback on the next tick() (as reverse playback will move
 // backwards towards 0 (and hit it instantly)).  Hence, if you want to reverse
-// right after TablePlayer creation, call SetReverse(true) *then* Trigger() to
+// right after tablePlayer creation, call SetReverse(true) *then* Trigger() to
 // fix the phase to the end of the table
-func (tp *TablePlayer) Trigger() {
+func (tp *tablePlayer) Trigger() {
 
 	if tp.isReversed {
 		// reverse playback
@@ -458,7 +458,7 @@ func (tp *TablePlayer) Trigger() {
 }
 
 // (re)sets the envelopes to their attack stage, regardless of current stage
-func (tp *TablePlayer) Attack() {
+func (tp *tablePlayer) Attack() {
 	tp.amplitudeADSREnvelope.attack()
 	tp.filterADSREnvelope.attack()
 }
@@ -468,17 +468,17 @@ func (tp *TablePlayer) Attack() {
 // it fully releases, as the amplitude adsr (specifically) has a doneAction callback
 // which removes the playback event from the active events in the engine
 // (assuming it fully releases, that is enters an off stage)
-func (tp *TablePlayer) Release() {
+func (tp *tablePlayer) Release() {
 	tp.amplitudeADSREnvelope.release()
 	tp.filterADSREnvelope.release()
 }
 
 // set the DC offset (obviously)
-func (tp *TablePlayer) SetDCOffset(dc float64) {
+func (tp *tablePlayer) SetDCOffset(dc float64) {
 	tp.dcOffset = dc
 }
 
-// specify the gain of the TablePlayer using decibels (0dBFS)
+// specify the gain of the tablePlayer using decibels (0dBFS)
 // ex:
 //  tp.SetGain(6.0)                               // =>  6db increase in volume
 //  tp.SetGain(-3.0)                              // =>  3db decrease in volume
@@ -487,14 +487,14 @@ func (tp *TablePlayer) SetDCOffset(dc float64) {
 //
 // awesome brief discussion here:
 //   https://sound.stackexchange.com/a/25533
-func (tp *TablePlayer) SetGain(db float64) {
+func (tp *tablePlayer) SetGain(db float64) {
 	tp.amplitude = decibelsToAmplitude(db)
 }
 
 // adjust playback rate of the table
 // only accepts arguments > 0
 // an optional slide time (specified in seconds) is allowed
-func (tp *TablePlayer) SetSpeed(speed float64, slideTime ...float64) {
+func (tp *tablePlayer) SetSpeed(speed float64, slideTime ...float64) {
 	// return on unacceptable speeds
 	if speed <= 0 {
 		return
@@ -543,7 +543,7 @@ func (tp *TablePlayer) SetSpeed(speed float64, slideTime ...float64) {
 }
 
 // like SetSpeed, but integer note values which represent chromatic pitch offset
-func (tp *TablePlayer) SetNote(n int, slideTime ...float64) {
+func (tp *tablePlayer) SetNote(n int, slideTime ...float64) {
 	tp.SetSpeed(math.Pow(2, float64(n)/12.0), slideTime...)
 }
 
@@ -553,7 +553,7 @@ func (tp *TablePlayer) SetNote(n int, slideTime ...float64) {
 // inform the tableplayer that you want the phase of the table to begin at the
 // end (upon table player creation, its default phase is set at the start
 // of the table).
-func (tp *TablePlayer) SetReverse(isReversed bool) {
+func (tp *tablePlayer) SetReverse(isReversed bool) {
 	// save it
 	tp.isReversed = isReversed
 	// if forwards playback and isReversed == true, set reverse playback
@@ -571,7 +571,7 @@ func (tp *TablePlayer) SetReverse(isReversed bool) {
 // -1: left (right fully muted)
 //  0: center (nothing altered)
 //  1: right (left fully muted)
-func (tp *TablePlayer) SetBalance(balance float64) {
+func (tp *tablePlayer) SetBalance(balance float64) {
 	// make sure balance is between -1 and 1 (inclusive)
 	if balance < -1.0 || 1.0 < balance {
 		return
@@ -591,22 +591,22 @@ func (tp *TablePlayer) SetBalance(balance float64) {
 }
 
 // setters for the filter
-func (tp *TablePlayer) SetFilterMode(filterMode FilterMode) {
+func (tp *tablePlayer) SetFilterMode(filterMode FilterMode) {
 	tp.filterLeft.setMode(filterMode)
 	tp.filterRight.setMode(filterMode)
 }
-func (tp *TablePlayer) SetFilterCutoff(cutoff float64) {
+func (tp *tablePlayer) SetFilterCutoff(cutoff float64) {
 	tp.filterLeft.setCutoff(cutoff)
 	tp.filterRight.setCutoff(cutoff)
 	// save the filter cutoff (in case it's used for envelope computation)
 	//
 	// NB. filter.setCutoff(x) limits x automatically (which ranges the
 	// cutoff such that  0 < cutoff < 1).  Therefore, we just let it clamp
-	// the cutoff, and save what it actually returned in the TablePlayer
+	// the cutoff, and save what it actually returned in the tablePlayer
 	// (the left filter was arbitrarily chosen here, it doesn't matter)
 	tp.filterCutoff = tp.filterLeft.cutoff
 }
-func (tp *TablePlayer) SetFilterResonance(resonance float64) {
+func (tp *tablePlayer) SetFilterResonance(resonance float64) {
 	tp.filterLeft.setResonance(resonance)
 	tp.filterRight.setResonance(resonance)
 }
@@ -615,41 +615,41 @@ func (tp *TablePlayer) SetFilterResonance(resonance float64) {
 
 // continuously updating the filter coefficients is expensive, hence there's an
 // option to just turn the filter cutoff envelope on/off
-func (tp *TablePlayer) SetFilterEnvelopeOn(filterEnvelopeOn bool) {
+func (tp *tablePlayer) SetFilterEnvelopeOn(filterEnvelopeOn bool) {
 	tp.filterEnvelopeOn = filterEnvelopeOn
 }
 
 // how much to augment the filter cutoff when the envelope is on
-func (tp *TablePlayer) SetFilterEnvelopeDepth(filterEnvelopeDepth float64) {
+func (tp *tablePlayer) SetFilterEnvelopeDepth(filterEnvelopeDepth float64) {
 	tp.filterEnvelopeDepth = filterEnvelopeDepth
 }
 
 //adsr times
-func (tp *TablePlayer) SetFilterAttack(attackTimeInSeconds float64) {
+func (tp *tablePlayer) SetFilterAttack(attackTimeInSeconds float64) {
 	tp.filterADSREnvelope.setAttack(attackTimeInSeconds)
 }
-func (tp *TablePlayer) SetFilterDecay(decayTimeInSeconds float64) {
+func (tp *tablePlayer) SetFilterDecay(decayTimeInSeconds float64) {
 	tp.filterADSREnvelope.setDecay(decayTimeInSeconds)
 }
-func (tp *TablePlayer) SetFilterSustain(sustainLevel float64) {
+func (tp *tablePlayer) SetFilterSustain(sustainLevel float64) {
 	tp.filterADSREnvelope.setSustain(sustainLevel)
 }
-func (tp *TablePlayer) SetFilterRelease(releaseTimeInSeconds float64) {
+func (tp *tablePlayer) SetFilterRelease(releaseTimeInSeconds float64) {
 	tp.filterADSREnvelope.setRelease(releaseTimeInSeconds)
 }
 
 // (amplitude) ADSR setters
 // can't use struct embedding here, as I might have multiple envelopes in the
 // future... who knows
-func (tp *TablePlayer) SetAmplitudeAttack(attackTimeInSeconds float64) {
+func (tp *tablePlayer) SetAmplitudeAttack(attackTimeInSeconds float64) {
 	tp.amplitudeADSREnvelope.setAttack(attackTimeInSeconds)
 }
-func (tp *TablePlayer) SetAmplitudeDecay(decayTimeInSeconds float64) {
+func (tp *tablePlayer) SetAmplitudeDecay(decayTimeInSeconds float64) {
 	tp.amplitudeADSREnvelope.setDecay(decayTimeInSeconds)
 }
-func (tp *TablePlayer) SetAmplitudeSustain(sustainLevel float64) {
+func (tp *tablePlayer) SetAmplitudeSustain(sustainLevel float64) {
 	tp.amplitudeADSREnvelope.setSustain(sustainLevel)
 }
-func (tp *TablePlayer) SetAmplitudeRelease(releaseTimeInSeconds float64) {
+func (tp *tablePlayer) SetAmplitudeRelease(releaseTimeInSeconds float64) {
 	tp.amplitudeADSREnvelope.setRelease(releaseTimeInSeconds)
 }
