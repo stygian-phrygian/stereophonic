@@ -218,7 +218,9 @@ func (e *Engine) SetInputChannels(numberOfChannels int) error {
 }
 
 // set the gain (in decibels) to be applied to audio input (should an audio
-// input device exist *already*, otherwise this does nothing)
+// input device exist *already*, otherwise this does nothing).  If an audio
+// input device *does* exist and you want it muted, call
+// SetInputGain(stereophonic.GainNegativeInfinity)
 func (e *Engine) SetInputGain(db float64) {
 	e.inputAmplitude = float32(decibelsToAmplitude(db))
 }
@@ -461,8 +463,8 @@ func (e *Engine) streamCallback(in, out []float32) {
 		}
 	}
 
-	// monitor audio input
-	if e.streamParameters.Input.Device != nil {
+	// monitor audio input (if not muted and device exists)
+	if e.inputAmplitude != 0 && e.streamParameters.Input.Device != nil {
 		switch e.streamParameters.Input.Channels {
 		case 1:
 			// mono
