@@ -10,8 +10,3 @@ installation of portaudio is required prior to usage of this library
 
 ## Usage
 Check out `_examples/`
-
-#### Possible Future Features
-* recording audio / resampling
-* effects sends (delay)
-* master effects (filter & side chain compressor)
