@@ -11,7 +11,7 @@ installation of portaudio & libsndfile is required prior to usage of this librar
 ## Usage
 Check out `_examples/` but the gist is:
 
-* Create an engine (then tweak/start it)
+- Create an engine (then tweak/start it)
 ``` go
 	engine, err := stereophonic.New()
 	if err != nil {
@@ -27,7 +27,7 @@ Check out `_examples/` but the gist is:
 		log.Fatal(err)
 	}
 ```
-* Load some audio samples (into engine slot indices)
+- Load some audio samples (into engine slot indices)
 ``` go
 	// the slot where the sample is loaded into the engine
 	slot := 1
@@ -35,7 +35,7 @@ Check out `_examples/` but the gist is:
 		log.Fatal(err)
 	}
 ```
-* Prepare events (of either limited or unlimited duration)
+- Prepare events (of either limited or unlimited duration)
 ``` go
 	// this specifies how long to wait before playback starts
 	// once the event is actually passed to Play()
@@ -57,7 +57,7 @@ Check out `_examples/` but the gist is:
 	// set a note / pitch value (an octave up)
 	event.SetNote(12)
 ```
-* Play events (releasing the unlimited duration events as necessary)
+- Play events (releasing the unlimited duration events as necessary)
 ``` go
 	engine.Play(event)
 	time.Sleep(3 * time.Second)
