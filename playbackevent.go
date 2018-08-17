@@ -63,12 +63,8 @@ type playbackEvent struct {
 // before it begins (variables like speed, offset, volume, etc)
 //
 // delayInSeconds <= 0 are ignored
-// durationInSeconds <= 0 results in an indefinite playback event, (ie. you
-// MUST call Release() if you want it to end)
-//
-// This is the playback event constructor, even though it's specified as a
-// method on the Engine.  The engine contains *necessary* information to create
-// a playback event.
+// durationInSeconds <= 0 results in an *unlimited* duration playback event,
+// (ie. you MUST call Release() if you want it to end)
 //
 func (e *Engine) Prepare(slot int, delayInSeconds, durationInSeconds float64) (*playbackEvent, error) {
 	e.Lock()
