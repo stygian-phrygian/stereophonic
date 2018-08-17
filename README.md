@@ -12,7 +12,7 @@ installation of portaudio & libsndfile is required prior to usage of this librar
 Check out `_examples/` but the gist is:
 
 1.  Create an engine (then tweak/start it)
-```
+``` go
 	engine, err := stereophonic.New()
 	if err != nil {
 		log.Fatal(err)
@@ -28,7 +28,7 @@ Check out `_examples/` but the gist is:
 	}
 ```
 2.  Load some audio samples (into engine slot indices)
-```
+``` go
 	// the slot where the sample is loaded into the engine
 	slot := 1
 	if err := engine.Load(slot, sampleDirectory+"808kick.wav"); err != nil {
@@ -36,7 +36,7 @@ Check out `_examples/` but the gist is:
 	}
 ```
 3.  Prepare events (of either limited or unlimited duration)
-```
+``` go
 	// this specifies how long to wait before playback starts
 	// once the event is actually passed to Play()
 	delayInSeconds := 0.0
@@ -58,7 +58,7 @@ Check out `_examples/` but the gist is:
 	event.SetNote(12)
 ```
 4.  Play events (releasing the unlimited duration events as necessary)
-```
+``` go
 	engine.Play(event)
 	time.Sleep(3 * time.Second)
 	event.Release()
