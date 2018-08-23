@@ -138,12 +138,6 @@ func main() {
 		}
 	}()
 
-	// // create UI
-	// box := tview.NewBox().SetBorder(true).SetTitle("Hello, world!")
-	// if err := tview.NewApplication().SetRoot(box, true).Run(); err != nil {
-	// 	panic(err)
-	// }
-
 	// allow events to occur
 	time.Sleep(time.Duration(32 * quarterNoteDurationInSeconds * float64(time.Second)))
 	// turn off the (indefinite and looping) event
